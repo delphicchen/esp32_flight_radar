@@ -255,6 +255,7 @@ globals:
   - { id: al_edit, type: int, initial_value: '0' }   # 目前編輯中的鬧鐘 index
   - { id: alarm_ringing, type: bool, initial_value: 'false' }
   - { id: snooze_at, type: uint32_t, initial_value: '0' }   # >0=貪睡中,到期 epoch 秒
+  - { id: ring_last_ms, type: uint32_t, initial_value: '0' }   # 上次向喇叭發聲的 millis
   - { id: wake_ms,   type: uint32_t, initial_value: '0' }
   - { id: kb_target, type: int,      initial_value: '0' }   # 0=lat 1=lon 2=rng
 
@@ -317,6 +318,7 @@ script:
             auto c = id(backlight).turn_on(); c.perform();
           }
           lv_obj_clear_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - lambda: 'id(ring_last_ms) = millis();'
       - lvgl.page.show: main_page
       - script.execute: fire_alarm
 
@@ -403,6 +405,11 @@ interval:
   - interval: 1s
     then:
       - lambda: |-
+          // 響鈴中 → 每 15 秒重播一次,直到使用者按 DISMISS
+          if (id(alarm_ringing) && (millis() - id(ring_last_ms)) >= 15000) {
+            id(ring_last_ms) = millis();
+            id(fire_alarm).execute();
+          }
           // 貪睡到期 → 重新響
           if (id(snooze_at) > 0 && !id(alarm_ringing)) {
             auto t = id(rtc_time).now();
@@ -679,7 +686,7 @@ font:
   - file: "gfonts://Roboto Condensed@700"
     id: font_clock
     size: 64
-    glyphs: "0123456789:-"
+    glyphs: "0123456789:- ALMR"
   - file: "gfonts://Roboto Mono"
     id: font_mono
     size: 18
@@ -1338,7 +1345,7 @@ lvgl:
               - label:
                   align: TOP_MID
                   y: 18
-                  text: "\uF0F3  ALARM"
+                  text: "ALARM"
                   text_font: font_clock
                   text_color: 0x00E66E
               - button:
