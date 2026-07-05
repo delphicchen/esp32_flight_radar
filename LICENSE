@@ -1,0 +1,69 @@
+ESP32 Flight Radar
+Copyright (c) 2026 delphicchen
+
+This work is licensed under the
+Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License
+(CC BY-NC-SA 4.0).
+
+You are free to:
+
+  * Share  — copy and redistribute the material in any medium or format
+  * Adapt  — remix, transform, and build upon the material
+
+Under the following terms:
+
+  * Attribution   — You must give appropriate credit, provide a link to the
+                    license, and indicate if changes were made. You may do so in
+                    any reasonable manner, but not in any way that suggests the
+                    licensor endorses you or your use.
+
+  * NonCommercial — You may NOT use the material for commercial purposes.
+                    Selling this project (or hardware bundled with it),
+                    offering it as a paid product or service, or otherwise using
+                    it primarily for commercial advantage or monetary
+                    compensation is NOT permitted.
+
+  * ShareAlike    — If you remix, transform, or build upon the material, you must
+                    distribute your contributions under the same license as the
+                    original.
+
+  * No additional restrictions — You may not apply legal terms or technological
+                    measures that legally restrict others from doing anything the
+                    license permits.
+
+Notices:
+
+  The full legal text of this license is available at:
+  https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+
+  A human-readable summary is available at:
+  https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+This software is provided "as is", without warranty of any kind, express or
+implied. The author is not liable for any claim, damages, or other liability
+arising from its use. Data shown by this project comes from third-party
+services (OpenSky Network, adsbdb, RainViewer and others); you are responsible
+for complying with each provider's own terms of use.
+
+---
+
+本作品採用「創用 CC 姓名標示-非商業性-相同方式分享 4.0 國際
+(CC BY-NC-SA 4.0)」授權。
+
+你可以自由地:分享、改作本素材。
+
+但須遵守下列條件:
+
+  * 姓名標示     — 你必須給予適當表彰、提供授權連結,並指出是否有變更。
+  * 非商業性     — 你「不得」將本素材用於商業目的。販售本專案(或搭售
+                    其硬體)、作為付費產品或服務提供、或以營利為主要目的
+                    使用,皆「不被允許」。
+  * 相同方式分享 — 若你改作本素材,必須以相同授權條款散布你的貢獻。
+  * 不得增加額外限制。
+
+完整法律條文:https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+授權摘要:    https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh_TW
+
+本軟體按「現狀」提供,不附任何明示或默示擔保。作者不對因使用本軟體所生
+之任何主張、損害或其他責任負責。本專案顯示之資料來自第三方服務,你須自行
+遵守各服務之使用條款。

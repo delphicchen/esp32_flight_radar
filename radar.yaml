@@ -1,0 +1,2712 @@
+# =============================================================
+# Flight Radar 桌面擺件 — Phase 1.5(UI 改用 LVGL,解決閃爍/延遲)
+# 板子:esp32-s3-5inch-rgb-001(腳位/時序已實機驗證)
+#
+# 功能:
+#   • WiFi 配置頁:熱點「Radar-Setup」(密碼 12345678)→ captive portal
+#   • Home Assistant 自動發現;背光/重啟/WiFi訊號/螢幕按鈕 = HA 實體
+#   • HA 氣候讀數示範:換掉 sensor.YOUR_TEMPERATURE_SENSOR
+#   • LVGL UI:只重繪變動區域 → 無黑屏閃爍
+#   • OTA:改韌體走 WiFi,esphome run 會自動選
+# =============================================================
+
+esphome:
+  name: flight-radar
+  friendly_name: Flight Radar
+  platformio_options:
+    lib_deps:
+      - kikuchan98/pngle@^1.0.0
+  includes:
+    - map_data.h
+    - radar_fetch.h
+    - alarm.h
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          // 開機立即清空兩個 canvas 圖層,消除 PSRAM 未初始化雜訊
+          radar_echo_clear((lv_obj_t *) id(echo_canvas));
+          radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                         id(home_lon).state, id(radar_range).state, false);
+      - delay: 3s
+      - lambda: |-
+          lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+          lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          if (id(map_on)) {
+            lv_obj_add_state((lv_obj_t *) id(map_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(map_btn_l), lv_color_hex(0x04180C), 0);
+            radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                           id(home_lon).state, id(radar_range).state, true);
+          }
+          if (id(echo_on)) {
+            lv_obj_add_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(echo_btn_l), lv_color_hex(0x04180C), 0);
+          }
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
+    sdkconfig_options:
+      CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
+
+psram:
+  mode: octal
+  speed: 120MHz   # 原廠 sdkconfig 即為 120MHz;80MHz 頻寬不足會撕裂/雜訊
+
+logger:
+  level: INFO
+
+wifi:
+  ap:
+    ssid: "Radar-Setup"
+    password: "12345678"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+time:
+  - platform: sntp
+    id: rtc_time
+    timezone: Asia/Taipei
+    on_time:
+      - seconds: '*'          # 每秒更新時鐘(LVGL 只重繪時鐘那塊區域)
+        then:
+          - lvgl.label.update:
+              id: clock_label
+              text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
+      - seconds: 0            # 每分鐘檢查鬧鐘
+        then:
+          - lambda: |-
+              auto t = id(rtc_time).now();
+              if (!t.is_valid() || id(alarm_ringing)) return;
+              int iso = alarmpk::iso_today(t.day_of_week);
+              uint32_t A[4] = { id(al0), id(al1), id(al2), id(al3) };
+              for (int i = 0; i < 4; i++) {
+                if (alarmpk::due(A[i], t.hour, t.minute, iso)) {
+                  ESP_LOGI("alarm", "alarm %d fired", i);
+                  id(start_alarm).execute();
+                  break;
+                }
+              }
+
+# ---- 可在網頁(http://flight-radar.local)或 HA 填寫的設定 ----
+# 全部存 NVS,斷電保留,改了不用重編韌體
+text:
+  - platform: template
+    name: OpenSky Client ID
+    id: opensky_client_id
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: OpenSky Client Secret
+    id: opensky_client_secret
+    mode: password
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm Speaker         # HA 的 media_player 實體,如 media_player.living_room
+    id: alarm_speaker
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm Sound URL       # 鬧鈴音檔 URL(mp3),留空則只發 media_player 動作
+    id: alarm_media
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+number:
+  - platform: template
+    name: Home Latitude
+    id: home_lat
+    min_value: -90
+    max_value: 90
+    step: 0.0001
+    initial_value: 25.0330      # 預設台北,請在網頁/HA 改成你家座標
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          if (id(map_on))
+            radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                           id(home_lon).state, id(radar_range).state, true);
+          if (id(echo_on)) {
+            // 先清掉舊比例的回波,等新圖磚下載完成再渲染
+            radar_echo_clear((lv_obj_t *) id(echo_canvas));
+            id(echo_refresh).execute();
+          }
+  - platform: template
+    name: Home Longitude
+    id: home_lon
+    min_value: -180
+    max_value: 180
+    step: 0.0001
+    initial_value: 121.5654
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          if (id(map_on))
+            radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                           id(home_lon).state, id(radar_range).state, true);
+          if (id(echo_on)) {
+            // 先清掉舊比例的回波,等新圖磚下載完成再渲染
+            radar_echo_clear((lv_obj_t *) id(echo_canvas));
+            id(echo_refresh).execute();
+          }
+  - platform: template
+    name: Radar Range
+    id: radar_range
+    min_value: 10
+    max_value: 200
+    step: 5
+    initial_value: 50           # 掃描半徑(km)
+    unit_of_measurement: km
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          if (id(map_on))
+            radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                           id(home_lon).state, id(radar_range).state, true);
+          if (id(echo_on)) {
+            // 先清掉舊比例的回波,等新圖磚下載完成再渲染
+            radar_echo_clear((lv_obj_t *) id(echo_canvas));
+            id(echo_refresh).execute();
+          }
+  - platform: template
+    name: Poll Interval
+    id: poll_interval
+    min_value: 10
+    max_value: 300
+    step: 5
+    initial_value: 30           # 抓取間隔(秒);30s=2880次/天(額度4000)
+    unit_of_measurement: s
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+# ---- 航班資料抓取(OpenSky OAuth2)----
+http_request:
+  timeout: 20s
+  verify_ssl: false
+  watchdog_timeout: 30s    # 請求期間放寬看門狗,避免 TLS 慢時重啟
+  buffer_size_rx: 8192
+  buffer_size_tx: 8192     # OpenSky 的 JWT token 有 2~3KB,預設 512B 塞不下
+
+globals:
+  - { id: os_token,     type: std::string }
+  - { id: os_token_exp, type: uint32_t, initial_value: '0' }   # millis秒
+  - { id: ac_lat, type: 'std::vector<float>' }
+  - { id: ac_lon, type: 'std::vector<float>' }
+  - { id: ac_trk, type: 'std::vector<float>' }   # 航向(度)
+  - { id: ac_vel, type: 'std::vector<float>' }   # 地速(m/s)
+  - { id: ac_alt, type: 'std::vector<float>' }   # 高度(m)
+  - { id: ac_cs,  type: 'std::vector<std::string>' }
+  - { id: ac_vr,  type: 'std::vector<float>' }   # 垂直速率(m/s)
+  - { id: slot_map, type: 'std::vector<int>' }   # 標記槽 -> 航班索引
+  - { id: sel_cs_g, type: std::string }          # 選取中的呼號
+  - { id: fetch_ms,    type: uint32_t, initial_value: '0' }
+  - { id: poll_tick,   type: int,      initial_value: '0' }
+  - { id: sweep_angle, type: float,    initial_value: '0' }
+  - { id: slot_angle, type: 'std::vector<float>' }   # 各槽方位角(度,-1=隱藏)
+  - { id: slot_glow,  type: 'std::vector<float>' }   # 各槽掃描高亮 0~1
+  - id: map_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: echo_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - { id: al0, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al1, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al2, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al3, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al_edit, type: int, initial_value: '0' }   # 目前編輯中的鬧鐘 index
+  - { id: alarm_ringing, type: bool, initial_value: 'false' }
+  - { id: snooze_at, type: uint32_t, initial_value: '0' }   # >0=貪睡中,到期 epoch 秒
+  - { id: wake_ms,   type: uint32_t, initial_value: '0' }
+  - { id: kb_target, type: int,      initial_value: '0' }   # 0=lat 1=lon 2=rng
+
+script:
+  - id: fetch_flights            # 丟給 core 1 背景 task,UI 不阻塞
+    mode: single
+    then:
+      - lambda: |-
+          radar_bg::request_states(id(opensky_client_id).state,
+                                   id(opensky_client_secret).state,
+                                   id(home_lat).state, id(home_lon).state,
+                                   id(radar_range).state);
+
+  - id: select_slot
+    parameters:
+      slot: int
+    then:
+      - lambda: |-
+          if (slot < 0 || slot >= (int) id(slot_map).size()) return;
+          int i = id(slot_map)[slot];
+          if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          id(sel_cs_g) = id(ac_cs)[i];
+          lv_label_set_text(id(sel_cs_l), id(ac_cs)[i].c_str());
+          lv_label_set_text(id(sel_route_l), "ROUTE ...");
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          float e = (id(ac_lon)[i] - lon0) * 111.320f * coslat;
+          float no = (id(ac_lat)[i] - lat0) * 110.574f;
+          float brg = atan2f(e, no) * 57.29578f;
+          if (brg < 0) brg += 360.0f;
+          char b[48];
+          snprintf(b, sizeof(b), "ALT %5.0f m   FL%03.0f", id(ac_alt)[i], id(ac_alt)[i] * 0.032808f);
+          lv_label_set_text(id(sel_l1), b);
+          snprintf(b, sizeof(b), "SPD %4.0f km/h  %3.0f kt", id(ac_vel)[i] * 3.6f, id(ac_vel)[i] * 1.9438f);
+          lv_label_set_text(id(sel_l2), b);
+          snprintf(b, sizeof(b), "TRK %03.0f    VS %+5.1f m/s", id(ac_trk)[i], id(ac_vr)[i]);
+          lv_label_set_text(id(sel_l3), b);
+          snprintf(b, sizeof(b), "DIST %.0f km   BRG %03.0f", sqrtf(e * e + no * no), brg);
+          lv_label_set_text(id(sel_l4), b);
+      - script.execute: fetch_route
+
+  - id: fetch_route            # adsbdb.com 查起訖機場(背景執行)
+    mode: single
+    then:
+      - lambda: 'radar_bg::request_route(id(sel_cs_g));'
+
+  - id: echo_refresh           # 回波:背景查最新圖層資訊
+    mode: single
+    then:
+      - lambda: |-
+          radar_bg::request_echo(id(home_lat).state, id(home_lon).state,
+                                 id(radar_range).state);
+
+  - id: start_alarm            # 開始響鈴:亮背光、顯示面板、發聲
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = true;
+          if (!id(backlight).current_values.is_on()) {
+            auto c = id(backlight).turn_on(); c.perform();
+          }
+          lv_obj_clear_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - lvgl.page.show: main_page
+      - script.execute: fire_alarm
+
+  - id: stop_alarm             # 關閉鬧鐘:停聲、收面板、清貪睡
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = false;
+          id(snooze_at) = 0;
+          lv_obj_add_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - homeassistant.action:
+          action: media_player.media_stop
+          data:
+            entity_id: !lambda 'return id(alarm_speaker).state;'
+
+  - id: snooze_alarm           # 貪睡:停聲、收面板、9 分鐘後再響
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = false;
+          auto t = id(rtc_time).now();
+          if (t.is_valid()) id(snooze_at) = (uint32_t) t.timestamp + 540;   // 9 分鐘
+          lv_obj_add_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - homeassistant.action:
+          action: media_player.media_stop
+          data:
+            entity_id: !lambda 'return id(alarm_speaker).state;'
+
+  - id: fire_alarm             # 觸發 HA 喇叭播放(需在 HA 裝置頁允許執行動作)
+    mode: single
+    then:
+      - homeassistant.action:
+          action: media_player.play_media
+          data:
+            entity_id: !lambda 'return id(alarm_speaker).state;'
+            media_content_id: !lambda 'return id(alarm_media).state;'
+            media_content_type: music
+
+  - id: alarm_refresh          # 依 globals 重繪鬧鐘頁所有欄位
+    mode: single
+    then:
+      - lambda: |-
+          uint32_t A[4] = { id(al0), id(al1), id(al2), id(al3) };
+          lv_obj_t *en[4]  = { id(a0_en), id(a1_en), id(a2_en), id(a3_en) };
+          lv_obj_t *enl[4] = { id(a0_enl), id(a1_enl), id(a2_enl), id(a3_enl) };
+          lv_obj_t *hl[4]  = { id(a0_h), id(a1_h), id(a2_h), id(a3_h) };
+          lv_obj_t *ml[4]  = { id(a0_m), id(a1_m), id(a2_m), id(a3_m) };
+          lv_obj_t *wd[4][7] = {
+            { id(a0d0),id(a0d1),id(a0d2),id(a0d3),id(a0d4),id(a0d5),id(a0d6) },
+            { id(a1d0),id(a1d1),id(a1d2),id(a1d3),id(a1d4),id(a1d5),id(a1d6) },
+            { id(a2d0),id(a2d1),id(a2d2),id(a2d3),id(a2d4),id(a2d5),id(a2d6) },
+            { id(a3d0),id(a3d1),id(a3d2),id(a3d3),id(a3d4),id(a3d5),id(a3d6) } };
+          char b[8];
+          for (int i = 0; i < 4; i++) {
+            bool e = alarmpk::en(A[i]);
+            if (e) lv_obj_add_state(en[i], LV_STATE_CHECKED);
+            else   lv_obj_clear_state(en[i], LV_STATE_CHECKED);
+            lv_label_set_text(enl[i], e ? "ON" : "OFF");
+            lv_obj_set_style_text_color(enl[i], lv_color_hex(e ? 0x04180C : 0x6E8273), 0);
+            snprintf(b, sizeof(b), "%02d", alarmpk::hh(A[i])); lv_label_set_text(hl[i], b);
+            snprintf(b, sizeof(b), "%02d", alarmpk::mm(A[i])); lv_label_set_text(ml[i], b);
+            for (int k = 0; k < 7; k++) {
+              bool on = alarmpk::day_on(A[i], k);
+              if (on) lv_obj_add_state(wd[i][k], LV_STATE_CHECKED);
+              else    lv_obj_clear_state(wd[i][k], LV_STATE_CHECKED);
+            }
+          }
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+  - platform: uptime
+    name: Uptime
+
+button:
+  - platform: restart
+    name: Restart
+
+
+
+interval:
+  # 抓取節拍器:每秒 +1,到達 Poll Interval 且條件允許就抓一次
+  - interval: 1s
+    then:
+      - lambda: |-
+          // 貪睡到期 → 重新響
+          if (id(snooze_at) > 0 && !id(alarm_ringing)) {
+            auto t = id(rtc_time).now();
+            if (t.is_valid() && (uint32_t) t.timestamp >= id(snooze_at)) {
+              id(snooze_at) = 0;
+              id(start_alarm).execute();
+            }
+          }
+          id(poll_tick) += 1;
+          bool creds = !id(opensky_client_id).state.empty() &&
+                       !id(opensky_client_secret).state.empty();
+          if (!creds) {
+            lv_label_set_text(id(status_label), "SET OPENSKY CREDENTIALS");
+            return;
+          }
+          if (id(poll_tick) >= (int) id(poll_interval).state) {
+            if (wifi::global_wifi_component->is_connected() &&
+                id(backlight).current_values.is_on()) {      // 背光關=暫停抓取
+              id(poll_tick) = 0;
+              id(fetch_flights).execute();
+            }
+          }
+      # 收背景 task 的結果(非阻塞)
+      - lambda: |-
+          if (radar_bg::g_auth_fail) {
+            radar_bg::g_auth_fail = false;
+            lv_label_set_text(id(status_label), "AUTH FAILED - CHECK CREDENTIALS");
+          }
+          static bool echo_init = false;
+          if (!echo_init && id(echo_on) && millis() > 8000 &&
+              wifi::global_wifi_component->is_connected()) {
+            echo_init = true;
+            id(echo_refresh).execute();
+          }
+          if (radar_bg::g_echo_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_echo_ready = false;
+            xSemaphoreGive(radar_bg::mtx());
+            if (id(echo_on))
+              radar_echo_present((lv_obj_t *) id(echo_canvas));   // 一次 memcpy 換整幀
+          }
+          if (radar_bg::g_route_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_route_ready = false;
+            lv_label_set_text(id(sel_route_l), radar_bg::g_route.c_str());
+            xSemaphoreGive(radar_bg::mtx());
+          }
+          if (!radar_bg::g_states_ready) return;
+          xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+          int n = radar_bg::g_result.size();
+          id(ac_lat).clear(); id(ac_lon).clear(); id(ac_trk).clear();
+          id(ac_vel).clear(); id(ac_alt).clear(); id(ac_cs).clear(); id(ac_vr).clear();
+          for (auto &ac : radar_bg::g_result) {
+            id(ac_lat).push_back(ac.lat); id(ac_lon).push_back(ac.lon);
+            id(ac_trk).push_back(ac.trk); id(ac_vel).push_back(ac.vel);
+            id(ac_alt).push_back(ac.alt); id(ac_cs).push_back(ac.cs);
+            id(ac_vr).push_back(ac.vr);
+          }
+          radar_bg::g_states_ready = false;
+          xSemaphoreGive(radar_bg::mtx());
+          id(fetch_ms) = millis();
+          // 選取中航班的詳情刷新
+          if (!id(sel_cs_g).empty()) {
+            int si = -1;
+            for (int i = 0; i < n; i++)
+              if (id(ac_cs)[i] == id(sel_cs_g)) { si = i; break; }
+            char b2[48];
+            if (si >= 0) {
+              float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+              float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+              float e2 = (id(ac_lon)[si] - lon0) * 111.320f * coslat;
+              float n2 = (id(ac_lat)[si] - lat0) * 110.574f;
+              float brg = atan2f(e2, n2) * 57.29578f;
+              if (brg < 0) brg += 360.0f;
+              snprintf(b2, sizeof(b2), "ALT %5.0f m   FL%03.0f",
+                       id(ac_alt)[si], id(ac_alt)[si] * 0.032808f);
+              lv_label_set_text(id(sel_l1), b2);
+              snprintf(b2, sizeof(b2), "SPD %4.0f km/h  %3.0f kt",
+                       id(ac_vel)[si] * 3.6f, id(ac_vel)[si] * 1.9438f);
+              lv_label_set_text(id(sel_l2), b2);
+              snprintf(b2, sizeof(b2), "TRK %03.0f    VS %+5.1f m/s",
+                       id(ac_trk)[si], id(ac_vr)[si]);
+              lv_label_set_text(id(sel_l3), b2);
+              snprintf(b2, sizeof(b2), "DIST %.0f km   BRG %03.0f",
+                       sqrtf(e2 * e2 + n2 * n2), brg);
+              lv_label_set_text(id(sel_l4), b2);
+            } else {
+              lv_label_set_text(id(sel_l1), "(out of range)");
+              lv_label_set_text(id(sel_l2), "");
+              lv_label_set_text(id(sel_l3), "");
+              lv_label_set_text(id(sel_l4), "");
+            }
+          }
+          char b[64];
+          auto t = id(rtc_time).now();
+          if (t.is_valid())
+            snprintf(b, sizeof(b), "AC:%d   UPD %02d:%02d:%02d", n, t.hour, t.minute, t.second);
+          else
+            snprintf(b, sizeof(b), "AC:%d", n);
+          lv_label_set_text(id(status_label), b);
+          static bool first_data = true;
+          if (first_data) {
+            first_data = false;
+            if (id(sel_cs_g).empty())
+              lv_label_set_text(id(sel_cs_l), "TAP AIRCRAFT");
+          }
+      # 航班點外插移動(每秒,依航向+地速推算目前位置)
+      - lambda: |-
+          lv_obj_t *marks[10] = { id(ac0), id(ac1), id(ac2), id(ac3), id(ac4),
+                                  id(ac5), id(ac6), id(ac7), id(ac8), id(ac9) };
+          lv_obj_t *imgs[10] = { (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1),
+                                 (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3),
+                                 (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5),
+                                 (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
+                                 (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9) };
+          lv_obj_t *dbs[10] = { id(ad0), id(ad1), id(ad2), id(ad3), id(ad4),
+                                id(ad5), id(ad6), id(ad7), id(ad8), id(ad9) };
+          if (id(slot_map).size() != 10) id(slot_map).assign(10, -1);
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float rng = id(radar_range).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
+          if (dt > 180.0f) dt = 180.0f;   // 資料太舊就不再外插
+          int n = id(ac_lat).size(), shown = 0;
+          for (int i = 0; i < n && shown < 10; i++) {
+            float rad = id(ac_trk)[i] * 3.14159265f / 180.0f;
+            float vkm = id(ac_vel)[i] * dt / 1000.0f;
+            float e  = (id(ac_lon)[i] - lon0) * 111.320f * coslat + vkm * sinf(rad);
+            float no = (id(ac_lat)[i] - lat0) * 110.574f          + vkm * cosf(rad);
+            if (e * e + no * no > rng * rng) continue;
+            int px = 240 + (int) (e / rng * 226.0f);
+            int py = 240 - (int) (no / rng * 226.0f);
+            lv_obj_set_pos(marks[shown], px - 14, py - 20);   // 圖示中心對準位置
+            lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
+            bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
+            lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
+            lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
+            char db[40];
+            snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
+                     id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
+            if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
+              lv_label_set_text(dbs[shown], db);
+            if (id(slot_angle).size() != 10) id(slot_angle).assign(10, -1.0f);
+            if (id(slot_glow).size() != 10) id(slot_glow).assign(10, 0.0f);
+            float bearing = atan2f(e, no) * 57.29578f;   // 0=北,順時針
+            if (bearing < 0) bearing += 360.0f;
+            id(slot_angle)[shown] = bearing;
+            id(slot_map)[shown] = i;
+            lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            shown++;
+          }
+          for (int i = shown; i < 10; i++) {
+            lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+            id(slot_map)[i] = -1;
+            if (id(slot_angle).size() == 10) id(slot_angle)[i] = -1.0f;
+          }
+  # 掃描線動畫(20fps,6 秒轉一圈;角度用時間基準→不受幀率漂移,較順)
+  - interval: 50ms
+    then:
+      - lambda: |-
+          const float PERIOD = 6000.0f;            // 一圈毫秒數
+          uint32_t now = millis();
+          float prev = id(sweep_angle);
+          float cur = fmodf((float) now / PERIOD * 360.0f, 360.0f);
+          id(sweep_angle) = cur;
+          const float DEG = 3.14159265f / 180.0f;
+          // 掃描線 + 8 條尾巴一起算(共用三角函式基準,減少重複)
+          lv_obj_t *lines[9] = { id(sweep_line)->obj,
+                                 id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj,
+                                 id(tail4)->obj, id(tail5)->obj, id(tail6)->obj, id(tail7)->obj };
+          static lv_point_t lp[9][2];
+          for (int k = 0; k < 9; k++) {
+            float a = (cur - k * 1.0f) * DEG;       // 第0條=掃描線,其後每條退 1°
+            lp[k][0].x = 240; lp[k][0].y = 240;
+            lp[k][1].x = 240 + (lv_coord_t) (226.0f * sinf(a));
+            lp[k][1].y = 240 - (lv_coord_t) (226.0f * cosf(a));
+            lv_line_set_points(lines[k], lp[k], 2);
+          }
+          // 航班點:被掃描線掃過→高亮,之後依時間漸暗(不受幀率影響)
+          if (id(slot_glow).size() != 10) return;
+          lv_obj_t *imgs[10] = { (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1),
+                                 (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3),
+                                 (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5),
+                                 (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
+                                 (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9) };
+          const float DECAY = 0.89f;               // 每幀衰減(50ms,約 0.5s 半衰)
+          for (int i = 0; i < 10; i++) {
+            float ang = id(slot_angle)[i];
+            if (ang < 0) continue;
+            bool crossed;
+            if (cur >= prev) crossed = (ang > prev && ang <= cur);
+            else             crossed = (ang > prev || ang <= cur);   // 跨 360
+            float g0 = id(slot_glow)[i];
+            float g = crossed ? 1.0f : g0 * DECAY;
+            id(slot_glow)[i] = g;
+            // 已回到基底且上一幀也是基底 → 略過 recolor(省重繪)
+            if (g < 0.02f && g0 < 0.02f) continue;
+            int idx = (i < (int) id(slot_map).size()) ? id(slot_map)[i] : -1;
+            bool selg = (idx >= 0 && !id(sel_cs_g).empty() &&
+                         idx < (int) id(ac_cs).size() && id(ac_cs)[idx] == id(sel_cs_g));
+            uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
+            uint8_t r = br + (uint8_t)((255 - br) * g);
+            uint8_t gg = bg + (uint8_t)((255 - bg) * g);
+            uint8_t b = bb + (uint8_t)((255 - bb) * g);
+            lv_obj_set_style_img_recolor(imgs[i], lv_color_make(r, gg, b), 0);
+          }
+  # 回波每 10 分鐘更新(開啟時)
+  - interval: 600s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(echo_on) && wifi::global_wifi_component->is_connected() &&
+                     id(backlight).current_values.is_on();
+          then:
+            - script.execute: echo_refresh
+  # 每 5 秒刷新 WiFi 狀態與座標顯示(只重繪那兩行)
+  - interval: 5s
+    then:
+      - lambda: |-
+          bool up = wifi::global_wifi_component->is_connected();
+          lv_label_set_text(id(wifi_icon), up ? LV_SYMBOL_WIFI : LV_SYMBOL_WARNING);
+          lv_obj_set_style_text_color(id(wifi_icon), lv_color_hex(up ? 0x00E66E : 0xFF7800), 0);
+      - lvgl.label.update:
+          id: coords_label
+          text: !lambda |-
+            char buf[48];
+            snprintf(buf, sizeof(buf), "%.4fN  %.4fE  R%.0fkm",
+                     id(home_lat).state, id(home_lon).state, id(radar_range).state);
+            return std::string(buf);
+
+# ---- 背光 ----
+output:
+  - platform: ledc
+    pin: GPIO1
+    id: bl_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: bl_pwm
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- 觸控 ----
+i2c:
+  sda: GPIO16
+  scl: GPIO15
+  frequency: 400kHz
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+
+# ---- 字型 ----
+font:
+  - file: "gfonts://Roboto Condensed"
+    id: font_small
+    size: 22
+  - file: "gfonts://Roboto Condensed"
+    id: font_mid
+    size: 28
+  - file: "gfonts://Roboto Condensed@700"
+    id: font_clock
+    size: 64
+    glyphs: "0123456789:-"
+  - file: "gfonts://Roboto Mono"
+    id: font_mono
+    size: 18
+  - file: "gfonts://Roboto Condensed"
+    id: font_tiny
+    size: 14
+
+image:
+  - file: plane.png
+    id: plane_img
+    type: RGB565
+    transparency: alpha_channel
+
+# ---- 螢幕(交給 LVGL 驅動:不自動更新、不自動清屏)----
+display:
+  - platform: rpi_dpi_rgb
+    id: main_display
+    update_interval: never
+    auto_clear_enabled: false
+    color_order: RGB
+    pclk_frequency: 17MHz
+    pclk_inverted: true
+    dimensions:
+      width: 800
+      height: 480
+    de_pin: GPIO40
+    hsync_pin: GPIO38
+    vsync_pin: GPIO39
+    pclk_pin: GPIO41
+    hsync_pulse_width: 8
+    hsync_back_porch: 8
+    hsync_front_porch: 4
+    vsync_pulse_width: 8
+    vsync_back_porch: 8
+    vsync_front_porch: 4
+    data_pins:
+      red: [46, 3, 8, 18, 17]
+      green: [14, 13, 12, 11, 10, 9]
+      blue: [0, 45, 48, 47, 21]
+
+# ---- LVGL UI ----
+lvgl:
+  displays: [main_display]
+  touchscreens: [my_touch]
+  bg_color: 0x040C08
+  disp_bg_color: 0x040C08
+  pages:
+    - id: main_page
+      bg_color: 0x040C08
+      pad_all: 0
+      widgets:
+        # ===== 地圖輪廓層(最底層,MAP 開關控制)=====
+        - canvas:
+            id: map_canvas
+            x: 12
+            y: 12
+            width: 456
+            height: 456
+            transparent: true
+        # ===== 雷達回波層(canvas,由 radar_draw_echo 重採樣繪製)=====
+        - canvas:
+            id: echo_canvas
+            x: 12
+            y: 12
+            width: 456
+            height: 456
+            transparent: true
+        # ===== 左:雷達盤(4 圈距離環 = 透明圓 obj + 綠框)=====
+        - obj: &ring
+            x: 12
+            y: 12
+            width: 456
+            height: 456
+            radius: 228
+            border_width: 1
+            border_color: 0x006030
+            bg_opa: TRANSP
+            clickable: false
+            scrollbar_mode: "OFF"
+        - obj:
+            <<: *ring
+            x: 69
+            y: 69
+            width: 342
+            height: 342
+            radius: 171
+        - obj:
+            <<: *ring
+            x: 126
+            y: 126
+            width: 228
+            height: 228
+            radius: 114
+        - obj:
+            <<: *ring
+            x: 183
+            y: 183
+            width: 114
+            height: 114
+            radius: 57
+        # 十字線
+        - line:
+            points: ["12, 240", "468, 240"]
+            line_color: 0x003820
+            line_width: 1
+        - line:
+            points: ["240, 12", "240, 468"]
+            line_color: 0x003820
+            line_width: 1
+        # 掃描尾巴(4 條漸暗,程式每幀更新座標)
+        # 掃描尾巴(8 條,間隔 2°,漸暗連成扇形餘暉)
+        - line: { id: tail0, points: ["240, 240", "240, 20"], line_color: 0x008B45, line_width: 5 }
+        - line: { id: tail1, points: ["240, 240", "240, 20"], line_color: 0x007A3C, line_width: 5 }
+        - line: { id: tail2, points: ["240, 240", "240, 20"], line_color: 0x006A34, line_width: 5 }
+        - line: { id: tail3, points: ["240, 240", "240, 20"], line_color: 0x00592C, line_width: 5 }
+        - line: { id: tail4, points: ["240, 240", "240, 20"], line_color: 0x004A25, line_width: 5 }
+        - line: { id: tail5, points: ["240, 240", "240, 20"], line_color: 0x00391C, line_width: 5 }
+        - line: { id: tail6, points: ["240, 240", "240, 20"], line_color: 0x002814, line_width: 5 }
+        - line: { id: tail7, points: ["240, 240", "240, 20"], line_color: 0x00190C, line_width: 5 }
+        # 掃描線(100ms 轉動)
+        - line:
+            id: sweep_line
+            points: ["240, 240", "240, 14"]
+            line_color: 0x00A050
+            line_width: 2
+        # 航班標記 ×10:飛機圖示(依航向旋轉)+ ATC 資料標籤,可點選
+        - obj:
+            id: ac0
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai0
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad0
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 0
+        - obj:
+            id: ac1
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai1
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad1
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 1
+        - obj:
+            id: ac2
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai2
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad2
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 2
+        - obj:
+            id: ac3
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai3
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad3
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 3
+        - obj:
+            id: ac4
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai4
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad4
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 4
+        - obj:
+            id: ac5
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai5
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad5
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 5
+        - obj:
+            id: ac6
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai6
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad6
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 6
+        - obj:
+            id: ac7
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai7
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad7
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 7
+        - obj:
+            id: ac8
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai8
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad8
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 8
+        - obj:
+            id: ac9
+            x: -200
+            y: -200
+            width: 104
+            height: 42
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai9
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - label:
+                  id: ad9
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 9
+        # 中心點(你的位置)
+        - obj:
+            x: 236
+            y: 236
+            width: 8
+            height: 8
+            radius: 4
+            bg_color: 0x00E66E
+            border_width: 0
+        # NESW
+        - label: { x: 232, y: 18,  text: "N", text_font: font_small, text_color: 0x00E66E }
+        - label: { x: 448, y: 228, text: "E", text_font: font_small, text_color: 0x6E8273 }
+        - label: { x: 234, y: 440, text: "S", text_font: font_small, text_color: 0x6E8273 }
+        - label: { x: 20,  y: 228, text: "W", text_font: font_small, text_color: 0x6E8273 }
+
+        # ===== 分隔線 =====
+        - line:
+            points: ["482, 0", "482, 480"]
+            line_color: 0x006030
+            line_width: 2
+
+        # ===== 右:資訊欄 =====
+        # MAP / ECHO 文字切換鈕(啟用=反白)
+        - button:
+            id: map_btn
+            x: 500
+            y: 154
+            width: 80
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: map_btn_l
+                  align: CENTER
+                  text: "MAP"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(map_btn), LV_STATE_CHECKED);
+                  id(map_on) = on;
+                  lv_obj_set_style_text_color(id(map_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
+                                 id(home_lon).state, id(radar_range).state, on);
+        - button:
+            id: echo_btn
+            x: 600
+            y: 154
+            width: 80
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: echo_btn_l
+                  align: CENTER
+                  text: "ECHO"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
+                  id(echo_on) = on;
+                  lv_obj_set_style_text_color(id(echo_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  if (on) {
+                    id(echo_refresh).execute();
+                  } else {
+                    radar_echo_clear((lv_obj_t *) id(echo_canvas));
+                  }
+        - button:
+            id: pwr_btn
+            x: 700
+            y: 154
+            width: 80
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: pwr_btn_l
+                  align: CENTER
+                  text: "PWR"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  if (millis() - id(wake_ms) < 1500) {
+                    // 喚醒後防誤觸:把狀態復原成按下
+                    lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+                    return;
+                  }
+                  bool on = lv_obj_has_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+                  lv_obj_set_style_text_color(id(pwr_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  if (on) {
+                    auto call = id(backlight).turn_on();
+                    call.perform();
+                  } else {
+                    auto call = id(backlight).turn_off();
+                    call.perform();
+                  }
+        - label:
+            id: wifi_icon
+            x: 762
+            y: 12
+            text: "\uF1EB"
+            text_font: montserrat_20
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[8];
+                  (void) b;
+                  lv_textarea_set_text((lv_obj_t *) id(ta_ssid),
+                      wifi::global_wifi_component->wifi_ssid().c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_pass), "");
+                  lv_textarea_set_text((lv_obj_t *) id(ta_cid),
+                      id(opensky_client_id).state.c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_sec),
+                      id(opensky_client_secret).state.c_str());
+                  lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_ssid));
+              - lvgl.page.show: config_page
+        - label:
+            id: clock_label
+            align: TOP_MID
+            x: 240
+            y: 16
+            text: "--:--:--"
+            text_font: font_clock
+            text_color: 0x00E66E
+            clickable: true
+            on_click:
+              - lvgl.page.show: alarm_page
+              - script.execute: alarm_refresh
+        - label:
+            id: coords_label
+            align: TOP_MID
+            x: 240
+            y: 96
+            text: "--.----N  ---.----E"
+            text_font: font_small
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[16];
+                  snprintf(b, sizeof(b), "%.4f", id(home_lat).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_lat), b);
+                  snprintf(b, sizeof(b), "%.4f", id(home_lon).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_lon), b);
+                  snprintf(b, sizeof(b), "%.0f", id(radar_range).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_rng), b);
+                  id(kb_target) = 0;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+              - lvgl.page.show: settings_page
+        - line:
+            points: ["490, 196", "792, 196"]
+            line_color: 0x003820
+            line_width: 1
+        # 選取航班詳情(點雷達上的飛機後顯示)
+        - label:
+            id: sel_cs_l
+            x: 500
+            y: 212
+            text: "INITIALIZING..."
+            text_font: font_mid
+            text_color: 0x00E66E
+        - label:
+            id: sel_route_l
+            x: 500
+            y: 248
+            text: " "
+            text_font: font_mono
+            text_color: 0xFFD24A
+        - label: { id: sel_l1, x: 500, y: 284, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l2, x: 500, y: 312, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l3, x: 500, y: 340, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l4, x: 500, y: 368, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        # 底部狀態列
+        - label:
+            id: status_label
+            x: 500
+            y: 446
+            text: "SET OPENSKY CREDENTIALS"
+            text_font: font_mono
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[8];
+                  (void) b;
+                  lv_textarea_set_text((lv_obj_t *) id(ta_ssid),
+                      wifi::global_wifi_component->wifi_ssid().c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_pass), "");
+                  lv_textarea_set_text((lv_obj_t *) id(ta_cid),
+                      id(opensky_client_id).state.c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_sec),
+                      id(opensky_client_secret).state.c_str());
+                  lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_cid));
+              - lvgl.page.show: config_page
+
+        # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
+        - obj:
+            id: alarm_overlay
+            x: 140
+            y: 150
+            width: 520
+            height: 180
+            radius: 12
+            bg_color: 0x0A2416
+            border_color: 0x00E66E
+            border_width: 3
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  align: TOP_MID
+                  y: 18
+                  text: "\uF0F3  ALARM"
+                  text_font: font_clock
+                  text_color: 0x00E66E
+              - button:
+                  x: 30
+                  y: 106
+                  width: 220
+                  height: 56
+                  radius: 8
+                  bg_color: 0x0A3A22
+                  border_width: 1
+                  border_color: 0x00A050
+                  widgets:
+                    - label: { align: CENTER, text: "SNOOZE 9m", text_font: font_mid, text_color: 0x00C060 }
+                  on_click:
+                    - script.execute: snooze_alarm
+              - button:
+                  x: 270
+                  y: 106
+                  width: 220
+                  height: 56
+                  radius: 8
+                  bg_color: 0x00C060
+                  widgets:
+                    - label: { align: CENTER, text: "DISMISS", text_font: font_mid, text_color: 0x04180C }
+                  on_click:
+                    - script.execute: stop_alarm
+
+    - id: settings_page
+      bg_color: 0x040C08
+      pad_all: 0
+      widgets:
+        - label:
+            x: 30
+            y: 20
+            text: "LOCATION / RANGE"
+            text_font: font_mid
+            text_color: 0x00E66E
+        - label: { x: 30,  y: 78,  text: "LAT",   text_font: font_small, text_color: 0x9AE6B4 }
+        - label: { x: 30,  y: 138, text: "LON",   text_font: font_small, text_color: 0x9AE6B4 }
+        - label: { x: 30,  y: 198, text: "RANGE", text_font: font_small, text_color: 0x9AE6B4 }
+        - textarea: &ta_style
+            id: ta_lat
+            x: 110
+            y: 68
+            width: 220
+            height: 44
+            one_line: true
+            max_length: 10
+            accepted_chars: "0123456789.-"
+            text_font: font_mid
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 0;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+        - textarea:
+            <<: *ta_style
+            id: ta_lon
+            y: 128
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 1;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+        - textarea:
+            <<: *ta_style
+            id: ta_rng
+            y: 188
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 2;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x00E66E), 0);
+        - label:
+            x: 350
+            y: 200
+            text: "km"
+            text_font: font_small
+            text_color: 0x6E8273
+        # SET / CANCEL
+        - button:
+            x: 30
+            y: 260
+            width: 145
+            height: 56
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "SET", text_font: font_mid, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
+                  float lo = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lon)));
+                  float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
+                  if (la >= -90 && la <= 90) {
+                    auto c = id(home_lat).make_call(); c.set_value(la); c.perform();
+                  }
+                  if (lo >= -180 && lo <= 180) {
+                    auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
+                  }
+                  if (rg >= 10 && rg <= 200) {
+                    auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
+                  }
+              - lvgl.page.show: main_page
+        - button:
+            x: 195
+            y: 260
+            width: 145
+            height: 56
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "CANCEL", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        # 手搓數字鍵盤(與整體風格一致)
+        - button:
+            x: 460
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "7", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '7');
+        - button:
+            x: 544
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "8", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '8');
+        - button:
+            x: 628
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "9", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '9');
+        - button:
+            x: 712
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "<", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_del_char(ta);
+        - button:
+            x: 460
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "4", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '4');
+        - button:
+            x: 544
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "5", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '5');
+        - button:
+            x: 628
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "6", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '6');
+        - button:
+            x: 712
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: ".", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '.');
+        - button:
+            x: 460
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "1", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '1');
+        - button:
+            x: 544
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "2", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '2');
+        - button:
+            x: 628
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "3", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '3');
+        - button:
+            x: 712
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '-');
+        - button:
+            x: 460
+            y: 374
+            width: 160
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "0", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                                                    : (lv_obj_t *) id(ta_rng);
+                  lv_textarea_add_char(ta, '0');
+        - button:
+            x: 628
+            y: 374
+            width: 160
+            height: 70
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "ENTER", text_font: font_mid, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
+                  float lo = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lon)));
+                  float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
+                  if (la >= -90 && la <= 90) {
+                    auto c = id(home_lat).make_call(); c.set_value(la); c.perform();
+                  }
+                  if (lo >= -180 && lo <= 180) {
+                    auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
+                  }
+                  if (rg >= 10 && rg <= 200) {
+                    auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
+                  }
+              - lvgl.page.show: main_page
+
+    - id: config_page
+      bg_color: 0x040C08
+      pad_all: 0
+      scrollable: false
+      scrollbar_mode: "OFF"
+      widgets:
+        - label: { x: 20, y: 8, text: "NETWORK / OPENSKY API", text_font: font_small, text_color: 0x00E66E }
+        - label: { x: 20, y: 44,  text: "SSID",   text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 86,  text: "PASS",   text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 128, text: "API ID", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 170, text: "SECRET", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - textarea:
+            id: ta_ssid
+            x: 92
+            y: 36
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 32
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_ssid));'
+        - textarea:
+            id: ta_pass
+            x: 92
+            y: 78
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 64
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_pass));'
+        - textarea:
+            id: ta_cid
+            x: 92
+            y: 120
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 96
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_cid));'
+        - textarea:
+            id: ta_sec
+            x: 92
+            y: 162
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 96
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_sec));'
+        - button:
+            x: 540
+            y: 40
+            width: 115
+            height: 48
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "SAVE", text_font: font_small, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  const char *ss = lv_textarea_get_text((lv_obj_t *) id(ta_ssid));
+                  const char *ps = lv_textarea_get_text((lv_obj_t *) id(ta_pass));
+                  const char *ci = lv_textarea_get_text((lv_obj_t *) id(ta_cid));
+                  const char *se = lv_textarea_get_text((lv_obj_t *) id(ta_sec));
+                  if (strlen(ci) > 0) {
+                    auto c = id(opensky_client_id).make_call(); c.set_value(ci); c.perform();
+                  }
+                  if (strlen(se) > 0) {
+                    auto c = id(opensky_client_secret).make_call(); c.set_value(se); c.perform();
+                  }
+                  if (strlen(ss) > 0 && strlen(ps) > 0)
+                    wifi::global_wifi_component->save_wifi_sta(ss, ps);
+              - lvgl.page.show: main_page
+        - button:
+            x: 668
+            y: 40
+            width: 115
+            height: 48
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "BACK", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        - keyboard:
+            id: cfg_kb
+            align: BOTTOM_MID
+            y: 0
+            width: 800
+            height: 240
+            mode: TEXT_LOWER
+            text_font: montserrat_18
+            bg_color: 0x0A1810
+            pad_all: 3
+            items:
+              bg_color: 0x0A2416
+              text_color: 0x00C060
+              text_font: montserrat_18
+              border_color: 0x00A050
+              border_width: 1
+              radius: 4
+              pressed:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+              checked:
+                bg_color: 0x00A050
+                text_color: 0x04180C
+    - id: alarm_page
+      bg_color: 0x040C08
+      pad_all: 0
+      scrollable: false
+      scrollbar_mode: "OFF"
+      widgets:
+        - label: { x: 20, y: 14, text: "ALARMS", text_font: font_mid, text_color: 0x00E66E }
+        - button:
+            x: 660
+            y: 10
+            width: 120
+            height: 40
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "BACK", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        - button:
+            id: a0_en
+            x: 20
+            y: 62
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a0_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_en(id(al0));'
+              - script.execute: alarm_refresh
+        - button:
+            x: 120
+            y: 62
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::add_h(id(al0), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a0_h, x: 166, y: 74, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 224
+            y: 62
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::add_h(id(al0), 1);'
+              - script.execute: alarm_refresh
+        - label: { x: 268, y: 74, text: ":", text_font: font_mid, text_color: 0x6E8273 }
+        - button:
+            x: 284
+            y: 62
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::add_m(id(al0), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a0_m, x: 330, y: 74, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 388
+            y: 62
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::add_m(id(al0), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d0
+            x: 448
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d1
+            x: 496
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d2
+            x: 544
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d3
+            x: 592
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d4
+            x: 640
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d5
+            x: 688
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d6
+            x: 736
+            y: 66
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 6);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1_en
+            x: 20
+            y: 164
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a1_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_en(id(al1));'
+              - script.execute: alarm_refresh
+        - button:
+            x: 120
+            y: 164
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::add_h(id(al1), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a1_h, x: 166, y: 176, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 224
+            y: 164
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::add_h(id(al1), 1);'
+              - script.execute: alarm_refresh
+        - label: { x: 268, y: 176, text: ":", text_font: font_mid, text_color: 0x6E8273 }
+        - button:
+            x: 284
+            y: 164
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::add_m(id(al1), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a1_m, x: 330, y: 176, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 388
+            y: 164
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::add_m(id(al1), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d0
+            x: 448
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d1
+            x: 496
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d2
+            x: 544
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d3
+            x: 592
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d4
+            x: 640
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d5
+            x: 688
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d6
+            x: 736
+            y: 168
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 6);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2_en
+            x: 20
+            y: 266
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a2_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_en(id(al2));'
+              - script.execute: alarm_refresh
+        - button:
+            x: 120
+            y: 266
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::add_h(id(al2), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a2_h, x: 166, y: 278, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 224
+            y: 266
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::add_h(id(al2), 1);'
+              - script.execute: alarm_refresh
+        - label: { x: 268, y: 278, text: ":", text_font: font_mid, text_color: 0x6E8273 }
+        - button:
+            x: 284
+            y: 266
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::add_m(id(al2), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a2_m, x: 330, y: 278, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 388
+            y: 266
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::add_m(id(al2), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d0
+            x: 448
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d1
+            x: 496
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d2
+            x: 544
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d3
+            x: 592
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d4
+            x: 640
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d5
+            x: 688
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d6
+            x: 736
+            y: 270
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 6);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3_en
+            x: 20
+            y: 368
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a3_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_en(id(al3));'
+              - script.execute: alarm_refresh
+        - button:
+            x: 120
+            y: 368
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::add_h(id(al3), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a3_h, x: 166, y: 380, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 224
+            y: 368
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::add_h(id(al3), 1);'
+              - script.execute: alarm_refresh
+        - label: { x: 268, y: 380, text: ":", text_font: font_mid, text_color: 0x6E8273 }
+        - button:
+            x: 284
+            y: 368
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::add_m(id(al3), -1);'
+              - script.execute: alarm_refresh
+        - label: { id: a3_m, x: 330, y: 380, width: 52, text: "00", text_font: font_mid, text_color: 0xD2E6D7, text_align: CENTER }
+        - button:
+            x: 388
+            y: 368
+            width: 40
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "+", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::add_m(id(al3), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d0
+            x: 448
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d1
+            x: 496
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d2
+            x: 544
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d3
+            x: 592
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d4
+            x: 640
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d5
+            x: 688
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d6
+            x: 736
+            y: 372
+            width: 44
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 6);'
+              - script.execute: alarm_refresh
