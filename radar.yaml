@@ -1376,6 +1376,14 @@ lvgl:
             text: "LOCATION / RANGE"
             text_font: font_mid
             text_color: 0x00E66E
+        - label:
+            x: 30
+            y: 336
+            width: 410
+            text: "! Larger range = more OpenSky credits. Over ~25 sq-deg (approx 400 km) each fetch costs 2 credits, so >400 km can exceed the free 4000/day quota."
+            text_font: font_tiny
+            text_color: 0xFFB020
+            long_mode: WRAP
         - label: { x: 30,  y: 78,  text: "LAT",   text_font: font_small, text_color: 0x9AE6B4 }
         - label: { x: 30,  y: 138, text: "LON",   text_font: font_small, text_color: 0x9AE6B4 }
         - label: { x: 30,  y: 198, text: "RANGE", text_font: font_small, text_color: 0x9AE6B4 }

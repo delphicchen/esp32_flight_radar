@@ -8,10 +8,21 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 ---
 
-## 📸 Screenshots / 畫面
+## 📸 Screenshot / 畫面
 
-<!-- Add your photos here / 在此放上你的實機照片 -->
-`docs/radar.jpg` · `docs/echo.jpg` · `docs/alarm.jpg`
+![ESP32 Flight Radar](docs/screenshot.jpg)
+
+## 🎬 Demo video / 示範影片
+
+▶ **[Watch the demo / 觀看示範影片](docs/demo.mp4)** (`docs/demo.mp4`)
+
+<!--
+For an inline player on the repo page, open README on github.com in edit mode
+and drag docs/demo.mp4 into this section — GitHub will host it and embed a player.
+若想在 repo 頁面內嵌播放器:在 github.com 以編輯模式開啟 README,把
+docs/demo.mp4 拖進本區塊,GitHub 會自動嵌入播放器。
+-->
+
 
 ---
 
