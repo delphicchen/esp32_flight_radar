@@ -3,3 +3,11 @@
 # You can modify this file to suit your needs.
 /.esphome/
 /secrets.yaml
+
+# Local scratch / backups (not for repo)
+compile.log
+*.bak
+radar_bak*.yaml
+radar_gemini.yaml
+/screenshot
+/demo.mp4
