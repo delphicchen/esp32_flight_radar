@@ -81,6 +81,18 @@ First flash must be over **USB** (`/dev/ttyUSB0` or `/dev/ttyACM0`; add yourself
 3. Cast devices only play a **full, reachable URL**. Put an mp3 in Home Assistant's `config/www/` and use `http://<HA-IP>:8123/local/alarm.mp3` (use the IP, not `homeassistant.local`).
 4. Test first in **Developer Tools → Actions**: `media_player.play_media` with your entity and URL. If the speaker rings, the alarm will too.
 
+#### Speaker auto-discovery (SCAN button)
+
+Instead of typing the entity id by hand, the alarm page can list every `media_player` in your Home Assistant. One-time setup:
+
+1. In Home Assistant open your **profile (bottom-left avatar) → Security → Long-lived access tokens → Create token**. Copy it — it is shown only once.
+2. Open the device's web page at `http://flight-radar.local` (or the device page in HA) and paste the token into **HA Token**. **HA URL** can stay empty — it defaults to `http://homeassistant.local:8123`; if the scan later reports `HA UNREACHABLE`, set it to your HA address by IP instead (e.g. `http://192.168.1.10:8123` — mDNS name resolution is unreliable on some networks). Both fields are saved to flash and survive reboots.
+3. On the alarm page press **SCAN**. The dropdown fills with all speakers by friendly name; pick one and it is written to **Alarm Speaker** immediately. Manual entry still works too.
+
+Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = the token is wrong or was revoked; `HA UNREACHABLE` = wrong HA URL / use the IP; `NO SPEAKERS FOUND` = HA has no `media_player` entities (add the Google Cast / Sonos / etc. integration first).
+
+> **Security note:** a long-lived token grants full access to your Home Assistant and is stored in the device's flash. Treat it like a password and keep the device on a trusted network — the firmware only uses it for this read-only speaker query.
+
 ### Configuration reference
 
 All of these are Home Assistant / web entities, stored in NVS:
@@ -91,7 +103,9 @@ All of these are Home Assistant / web entities, stored in NVS:
 | Home Latitude / Longitude | Radar center (your location) |
 | Radar Range | Scan radius in km (10–500) |
 | Poll Interval | Seconds between fetches (default 30 → 2880/day, within the 4000/day quota) |
-| Alarm Speaker | HA `media_player` entity to ring through |
+| HA URL | Home Assistant address for speaker scan (empty = `http://homeassistant.local:8123`) |
+| HA Token | HA long-lived access token used by the SCAN button |
+| Alarm Speaker | HA `media_player` entity to ring through (type it or use SCAN) |
 | Alarm Sound URL | mp3 to play when an alarm fires |
 
 ### Using it outside Taiwan
@@ -182,6 +196,18 @@ esphome run radar.yaml
 3. Cast 裝置只吃**完整、連得到的 URL**。把 mp3 放到 HA 的 `config/www/`,網址用 `http://<HA的IP>:8123/local/alarm.mp3`(用 IP,不要用 `homeassistant.local`)。
 4. 先在 **開發者工具 → 動作** 用 `media_player.play_media` 帶入你的實體與網址測試;喇叭有響,鬧鐘就會響。
 
+#### 自動搜尋喇叭(SCAN 鈕)
+
+不必手打 entity id,鬧鐘頁可以直接列出 HA 裡所有的 `media_player`。一次性設定:
+
+1. 在 Home Assistant 開啟**個人資料(左下角頭像)→ 安全性 → 長期存取權杖 → 建立權杖**,複製起來——它只會顯示這一次。
+2. 開啟裝置網頁 `http://flight-radar.local`(或 HA 的裝置頁),把權杖貼進 **HA Token**。**HA URL** 可以留空——預設 `http://homeassistant.local:8123`;若之後掃描顯示 `HA UNREACHABLE`,請改填 HA 的 IP(如 `http://192.168.1.10:8123`,mDNS 名稱解析在部分網路不可靠)。兩個欄位都會存進 flash,重開機不會消失。
+3. 到鬧鐘頁按 **SCAN**,下拉選單就會列出所有喇叭(顯示友善名稱);點選後立即寫入 **Alarm Speaker**。仍然可以手動填寫。
+
+疑難排解:`SET HA TOKEN FIRST` = 還沒做第 2 步;`TOKEN INVALID` = 權杖錯誤或已撤銷;`HA UNREACHABLE` = HA URL 不對,改用 IP;`NO SPEAKERS FOUND` = HA 裡沒有任何 `media_player` 實體(先新增 Google Cast / Sonos 等整合)。
+
+> **安全性提醒:**長期權杖等同 HA 的完整存取權,且儲存在裝置 flash 中。請把它當密碼看待、讓裝置留在信任的內網;韌體只會用它做這個唯讀的喇叭查詢。
+
 ### 設定項一覽
 
 以下皆為 Home Assistant / 網頁實體,存於 NVS:
@@ -192,7 +218,9 @@ esphome run radar.yaml
 | Home Latitude / Longitude | 雷達中心(你的位置) |
 | Radar Range | 掃描半徑(公里,10–500) |
 | Poll Interval | 抓取間隔秒數(預設 30 → 每日 2880 次,在 4000 次/日額度內) |
-| Alarm Speaker | 用來發聲的 HA `media_player` 實體 |
+| HA URL | 喇叭掃描用的 HA 位址(留空 = `http://homeassistant.local:8123`) |
+| HA Token | SCAN 鈕使用的 HA 長期存取權杖 |
+| Alarm Speaker | 用來發聲的 HA `media_player` 實體(手填或用 SCAN 選) |
 | Alarm Sound URL | 鬧鐘響時播放的 mp3 |
 
 ### 在台灣以外地區使用

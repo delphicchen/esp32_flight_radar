@@ -29,7 +29,7 @@ struct AcInfo {
 };
 
 struct Job {
-  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather
+  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers
   std::string cid, sec, callsign;
   float lat, lon, range;
 };
@@ -46,6 +46,9 @@ struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
 inline WxInfo g_wx;
 inline volatile bool g_wx_ready = false;   // true=g_wx 有新資料待主迴圈取用
 inline bool g_wx_valid = false;            // 曾成功抓過至少一次
+inline std::string g_speakers;             // HA 喇叭清單:每行 entity_id|friendly_name
+inline volatile bool g_speakers_ready = false;
+inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token 錯 / <=0 連不上
 
 inline SemaphoreHandle_t mtx() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
@@ -230,6 +233,25 @@ inline void do_weather(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
+// 用 HA REST /api/template 列出所有 media_player(j.cid=HA URL、j.sec=長期 token)
+inline void do_speakers(const Job &j) {
+  std::string url = j.cid;
+  while (!url.empty() && url.back() == '/') url.pop_back();
+  url += "/api/template";
+  // Jinja 模板在 HA 端渲染,回應為純文字:每行 entity_id|friendly_name
+  std::string body =
+      "{\"template\":\"{% for e in states.media_player %}"
+      "{{ e.entity_id }}|{{ e.name }}\\n{% endfor %}\"}";
+  int st = 0;
+  std::string r = http_req(url, true, body, "application/json", j.sec, st);
+  ESP_LOGI("radar_bg", "speakers http %d (%u bytes)", st, (unsigned) r.size());
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_spk_status = st;
+  g_speakers = (st == 200) ? r : "";
+  g_speakers_ready = true;
+  xSemaphoreGive(mtx());
+}
+
 // ---- pngle 解碼 context:把 tile 像素寫進 512x512 RGBA 暫存 ----
 struct PngCtx { uint8_t *rgba; int w, h; };
 
@@ -357,6 +379,7 @@ inline void task_fn(void *arg) {
       else if (j->type == 2) do_route(*j);
       else if (j->type == 3) do_echo(*j);
       else if (j->type == 4) do_weather(*j);
+      else if (j->type == 5) do_speakers(*j);
       delete j;
     }
   }
@@ -386,6 +409,12 @@ inline void request_echo(float lat, float lon, float range) {
 inline void request_weather(float lat, float lon) {
   ensure_task();
   Job *j = new Job{4, "", "", "", lat, lon, 0};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+}
+
+inline void request_speakers(const std::string &url, const std::string &token) {
+  ensure_task();
+  Job *j = new Job{5, url, token, "", 0, 0, 0};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
 }
 

@@ -120,6 +120,20 @@ text:
     restore_value: true
     entity_category: config
   - platform: template
+    name: HA URL                # HA 位址;空值=http://homeassistant.local:8123,不通請填 IP
+    id: ha_url
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: HA Token              # HA 長期存取權杖(個人資料頁→安全性),供喇叭掃描用
+    id: ha_token
+    mode: password
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
     name: Alarm Speaker         # HA 的 media_player 實體,如 media_player.living_room
     id: alarm_speaker
     mode: text
@@ -261,6 +275,7 @@ globals:
   - { id: wake_ms,   type: uint32_t, initial_value: '0' }
   - { id: kb_target, type: int,      initial_value: '0' }   # 0=lat 1=lon 2=rng
   - { id: wx_last_ms, type: uint32_t, initial_value: '0' }  # 上次抓天氣的 millis,0=立即抓
+  - { id: spk_ids, type: 'std::vector<std::string>' }       # SCAN 到的喇叭 entity id(與下拉選單同序)
 
 script:
   - id: fetch_flights            # 丟給 core 1 背景 task,UI 不阻塞
@@ -506,6 +521,46 @@ interval:
             xSemaphoreGive(radar_bg::mtx());
             if (id(sel_cs_g).empty())
               id(show_weather).execute();
+          }
+          // 喇叭掃描結果 → 填入鬧鐘頁下拉選單
+          if (radar_bg::g_speakers_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_speakers_ready = false;
+            std::string raw = radar_bg::g_speakers;
+            int st2 = radar_bg::g_spk_status;
+            xSemaphoreGive(radar_bg::mtx());
+            lv_obj_t *dd = (lv_obj_t *) id(spk_dd);
+            id(spk_ids).clear();
+            if (st2 == 401 || st2 == 403) {
+              lv_dropdown_set_options(dd, "TOKEN INVALID");
+            } else if (st2 != 200) {
+              lv_dropdown_set_options(dd, "HA UNREACHABLE");
+            } else {
+              std::string names;
+              size_t pos = 0;
+              while (pos < raw.size()) {
+                size_t nl = raw.find('\n', pos);
+                if (nl == std::string::npos) nl = raw.size();
+                std::string line = raw.substr(pos, nl - pos);
+                pos = nl + 1;
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                size_t bar = line.find('|');
+                if (bar == std::string::npos || bar == 0) continue;
+                id(spk_ids).push_back(line.substr(0, bar));
+                if (!names.empty()) names += "\n";
+                names += line.substr(bar + 1);
+              }
+              if (id(spk_ids).empty()) {
+                lv_dropdown_set_options(dd, "NO SPEAKERS FOUND");
+              } else {
+                lv_dropdown_set_options(dd, names.c_str());
+                for (size_t k = 0; k < id(spk_ids).size(); k++)
+                  if (id(spk_ids)[k] == id(alarm_speaker).state) {
+                    lv_dropdown_set_selected(dd, k);
+                    break;
+                  }
+              }
+            }
           }
           if (!radar_bg::g_states_ready) return;
           xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
@@ -2775,3 +2830,48 @@ lvgl:
             on_click:
               - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 6);'
               - script.execute: alarm_refresh
+        # ===== 喇叭選擇列:SCAN 透過 HA REST /api/template 列出所有 media_player =====
+        - label: { x: 20, y: 444, text: "SPEAKER", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - dropdown:
+            id: spk_dd
+            x: 100
+            y: 430
+            width: 470
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  auto call = id(alarm_speaker).make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        - button:
+            x: 586
+            y: 430
+            width: 110
+            height: 44
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "SCAN", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *dd = (lv_obj_t *) id(spk_dd);
+                  if (id(ha_token).state.empty()) {
+                    lv_dropdown_set_options(dd, "SET HA TOKEN FIRST");
+                    return;
+                  }
+                  std::string url = id(ha_url).state;
+                  if (url.empty()) url = "http://homeassistant.local:8123";
+                  id(spk_ids).clear();
+                  lv_dropdown_set_options(dd, "SCANNING ...");
+                  radar_bg::request_speakers(url, id(ha_token).state);
