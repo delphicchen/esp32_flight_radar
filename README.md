@@ -96,7 +96,17 @@ All of these are Home Assistant / web entities, stored in NVS:
 
 ### Using it outside Taiwan
 
-`map_data.h` contains a simplified Taiwan county outline. To use your own region, take a boundary GeoJSON, simplify it (e.g. Douglas–Peucker) and emit a C array of `lat,lon` pairs separated by `NAN,NAN` in the same format. The radar projects it automatically for your center and range.
+The repo ships with a Taiwan outline in `map_data.h`, but the radar projection itself is fully generic — just regenerate the map for your own location before compiling:
+
+```bash
+# Tokyo, up to 150 km range
+python tools/make_map.py --lat 35.6762 --lon 139.6503 --radius 150
+
+# London, 300 km, with state/province borders
+python tools/make_map.py --lat 51.5074 --lon -0.1278 --radius 300 --states
+```
+
+The script (pure Python, no packages needed) downloads [Natural Earth](https://www.naturalearthdata.com/) 1:10m coastline + country border data (public domain, cached in `tools/cache/`), clips it around your coordinates, simplifies it to roughly one radar pixel of detail, and overwrites `map_data.h`. Set `--radius` to the largest radar range you plan to use. Useful options: `--states` adds admin-1 borders (can be dense in some countries), `--geojson file.geojson` uses your own boundary file instead of downloading, `--tol` / `--max-points` control detail.
 
 ### Data sources & credits
 
@@ -105,6 +115,7 @@ All of these are Home Assistant / web entities, stored in NVS:
 - Weather radar — [RainViewer](https://www.rainviewer.com/)
 - Local weather — [Open-Meteo](https://open-meteo.com/)
 - Taiwan boundaries — [g0v/twgeojson](https://github.com/g0v/twgeojson)
+- World map data — [Natural Earth](https://www.naturalearthdata.com/) (public domain)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 Please respect each provider's free-tier terms; this project is a hobby build, not a service.
@@ -186,7 +197,17 @@ esphome run radar.yaml
 
 ### 在台灣以外地區使用
 
-`map_data.h` 內含簡化過的台灣縣市輪廓。若要換成你的地區,取一份邊界 GeoJSON,做簡化(如 Douglas–Peucker),以相同格式輸出 `lat,lon` 座標對、以 `NAN,NAN` 分隔折線的 C 陣列即可。雷達會依你的中心與半徑自動投影。
+repo 內附的 `map_data.h` 是台灣輪廓,但雷達投影本身完全通用——編譯前為你的位置重新產生地圖即可:
+
+```bash
+# 東京,最大半徑 150 km
+python tools/make_map.py --lat 35.6762 --lon 139.6503 --radius 150
+
+# 倫敦,300 km,加省/州界
+python tools/make_map.py --lat 51.5074 --lon -0.1278 --radius 300 --states
+```
+
+腳本(純 Python,免裝套件)會下載 [Natural Earth](https://www.naturalearthdata.com/) 1:10m 海岸線+國界資料(public domain,快取於 `tools/cache/`),裁切你座標周圍的範圍、簡化到約一個雷達像素的細節,然後覆寫 `map_data.h`。`--radius` 請設為你會用到的最大雷達半徑。常用選項:`--states` 加省/州界(部分國家會很密)、`--geojson file.geojson` 改用自備邊界檔不下載、`--tol` / `--max-points` 調細節。
 
 ### 資料來源與致謝
 
@@ -195,6 +216,7 @@ esphome run radar.yaml
 - 氣象雷達 — [RainViewer](https://www.rainviewer.com/)
 - 在地天氣 — [Open-Meteo](https://open-meteo.com/)
 - 台灣界線 — [g0v/twgeojson](https://github.com/g0v/twgeojson)
+- 世界地圖資料 — [Natural Earth](https://www.naturalearthdata.com/)(public domain)
 - 概念啟發 — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 請遵守各資料來源的免費方案條款;本專案是自用興趣作品,並非商業服務。

@@ -412,8 +412,8 @@ inline void radar_draw_map(lv_obj_t *cv, float lat0, float lon0, float rng, bool
     bool have_prev = false;
     lv_point_t prev{0, 0};
     float pd2 = 1e18f;
-    for (int i = 0; i + 1 < TW_MAP_LEN; i += 2) {
-      float la = TW_MAP[i], lo = TW_MAP[i + 1];
+    for (int i = 0; i + 1 < MAP_OUTLINE_LEN; i += 2) {
+      float la = MAP_OUTLINE[i], lo = MAP_OUTLINE[i + 1];
       if (isnan(la)) { have_prev = false; continue; }
       float e = (lo - lon0) * 111.320f * coslat;
       float n = (la - lat0) * 110.574f;
