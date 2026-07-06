@@ -25,6 +25,8 @@ esphome:
     then:
       - lambda: |-
           // 開機立即清空兩個 canvas 圖層,消除 PSRAM 未初始化雜訊
+          // 喇叭下拉選單:字型無 FontAwesome 箭頭字形(U+F078),移除符號免警告
+          lv_dropdown_set_symbol(id(spk_dd)->obj, nullptr);
           radar_echo_clear((lv_obj_t *) id(echo_canvas));
           radar_draw_map((lv_obj_t *) id(map_canvas), id(home_lat).state,
                          id(home_lon).state, id(radar_range).state, false);
@@ -530,14 +532,15 @@ interval:
             std::string raw = radar_bg::g_speakers;
             int st2 = radar_bg::g_spk_status;
             xSemaphoreGive(radar_bg::mtx());
-            lv_obj_t *dd = (lv_obj_t *) id(spk_dd);
+            // 注意:id(spk_dd) 是 LvDropdownType*(compound),不可硬轉 lv_obj_t*
+            auto *dd = id(spk_dd);
             id(spk_ids).clear();
             if (st2 == 401 || st2 == 403) {
-              lv_dropdown_set_options(dd, "TOKEN INVALID");
+              dd->set_options({"TOKEN INVALID"});
             } else if (st2 != 200) {
-              lv_dropdown_set_options(dd, "HA UNREACHABLE");
+              dd->set_options({"HA UNREACHABLE"});
             } else {
-              std::string names;
+              std::vector<std::string> names;
               size_t pos = 0;
               while (pos < raw.size()) {
                 size_t nl = raw.find('\n', pos);
@@ -548,16 +551,15 @@ interval:
                 size_t bar = line.find('|');
                 if (bar == std::string::npos || bar == 0) continue;
                 id(spk_ids).push_back(line.substr(0, bar));
-                if (!names.empty()) names += "\n";
-                names += line.substr(bar + 1);
+                names.push_back(line.substr(bar + 1));
               }
               if (id(spk_ids).empty()) {
-                lv_dropdown_set_options(dd, "NO SPEAKERS FOUND");
+                dd->set_options({"NO SPEAKERS FOUND"});
               } else {
-                lv_dropdown_set_options(dd, names.c_str());
+                dd->set_options(names);
                 for (size_t k = 0; k < id(spk_ids).size(); k++)
                   if (id(spk_ids)[k] == id(alarm_speaker).state) {
-                    lv_dropdown_set_selected(dd, k);
+                    dd->set_selected_index(k, LV_ANIM_OFF);
                     break;
                   }
               }
@@ -795,6 +797,15 @@ font:
   - file: "gfonts://Roboto Condensed"
     id: font_small
     size: 22
+    # 喇叭名稱常為中文:繁體=Big5 一級常用字、簡體=GB2312 一級扣重複
+    # (tools/make_cjk_glyphs.py 產生)
+    extras:
+      - file: "gfonts://Noto Sans TC"
+        glyphs:
+          - !include cjk_glyphs.yaml
+      - file: "gfonts://Noto Sans SC"
+        glyphs:
+          - !include cjk_glyphs_sc.yaml
   - file: "gfonts://Roboto Condensed"
     id: font_mid
     size: 28
@@ -1360,7 +1371,7 @@ lvgl:
                       id(opensky_client_id).state.c_str());
                   lv_textarea_set_text((lv_obj_t *) id(ta_sec),
                       id(opensky_client_secret).state.c_str());
-                  lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_ssid));
+                  lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_ssid));
               - lvgl.page.show: config_page
         - label:
             id: clock_label
@@ -1440,7 +1451,7 @@ lvgl:
                       id(opensky_client_id).state.c_str());
                   lv_textarea_set_text((lv_obj_t *) id(ta_sec),
                       id(opensky_client_secret).state.c_str());
-                  lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_cid));
+                  lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));
               - lvgl.page.show: config_page
 
         # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
@@ -1867,7 +1878,7 @@ lvgl:
             border_width: 1
             radius: 4
             on_click:
-              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_ssid));'
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_ssid));'
         - textarea:
             id: ta_pass
             x: 92
@@ -1883,7 +1894,7 @@ lvgl:
             border_width: 1
             radius: 4
             on_click:
-              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_pass));'
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_pass));'
         - textarea:
             id: ta_cid
             x: 92
@@ -1899,7 +1910,7 @@ lvgl:
             border_width: 1
             radius: 4
             on_click:
-              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_cid));'
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));'
         - textarea:
             id: ta_sec
             x: 92
@@ -1915,7 +1926,7 @@ lvgl:
             border_width: 1
             radius: 4
             on_click:
-              - lambda: 'lv_keyboard_set_textarea((lv_obj_t *) id(cfg_kb), (lv_obj_t *) id(ta_sec));'
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_sec));'
         - button:
             x: 540
             y: 40
@@ -2853,6 +2864,17 @@ lvgl:
             bg_color: 0x0A2416
             border_width: 1
             border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
             options:
               - "PRESS SCAN"
             on_value:
@@ -2875,13 +2897,13 @@ lvgl:
               - label: { align: CENTER, text: "SCAN", text_font: font_small, text_color: 0x00C060 }
             on_click:
               - lambda: |-
-                  lv_obj_t *dd = (lv_obj_t *) id(spk_dd);
+                  // 注意:id(spk_dd) 是 LvDropdownType*(compound),不可硬轉 lv_obj_t*
                   if (id(ha_token).state.empty()) {
-                    lv_dropdown_set_options(dd, "SET HA TOKEN FIRST");
+                    id(spk_dd)->set_options({"SET HA TOKEN FIRST"});
                     return;
                   }
                   std::string url = id(ha_url).state;
                   if (url.empty()) url = "http://homeassistant.local:8123";
                   id(spk_ids).clear();
-                  lv_dropdown_set_options(dd, "SCANNING ...");
+                  id(spk_dd)->set_options({"SCANNING ..."});
                   radar_bg::request_speakers(url, id(ha_token).state);
