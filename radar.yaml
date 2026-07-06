@@ -157,6 +157,7 @@ number:
             radar_echo_clear((lv_obj_t *) id(echo_canvas));
             id(echo_refresh).execute();
           }
+          id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
     name: Home Longitude
     id: home_lon
@@ -179,11 +180,12 @@ number:
             radar_echo_clear((lv_obj_t *) id(echo_canvas));
             id(echo_refresh).execute();
           }
+          id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
     name: Radar Range
     id: radar_range
     min_value: 10
-    max_value: 200
+    max_value: 500
     step: 5
     initial_value: 50           # 掃描半徑(km)
     unit_of_measurement: km
@@ -258,6 +260,7 @@ globals:
   - { id: ring_last_ms, type: uint32_t, initial_value: '0' }   # 上次向喇叭發聲的 millis
   - { id: wake_ms,   type: uint32_t, initial_value: '0' }
   - { id: kb_target, type: int,      initial_value: '0' }   # 0=lat 1=lon 2=rng
+  - { id: wx_last_ms, type: uint32_t, initial_value: '0' }  # 上次抓天氣的 millis,0=立即抓
 
 script:
   - id: fetch_flights            # 丟給 core 1 背景 task,UI 不阻塞
@@ -277,6 +280,12 @@ script:
           if (slot < 0 || slot >= (int) id(slot_map).size()) return;
           int i = id(slot_map)[slot];
           if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          if (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g)) {
+            // 再點一次同一台 → 取消選取,右下角換回天氣
+            id(sel_cs_g).clear();
+            id(show_weather).execute();
+            return;
+          }
           id(sel_cs_g) = id(ac_cs)[i];
           lv_label_set_text(id(sel_cs_l), id(ac_cs)[i].c_str());
           lv_label_set_text(id(sel_route_l), "ROUTE ...");
@@ -296,6 +305,34 @@ script:
           snprintf(b, sizeof(b), "DIST %.0f km   BRG %03.0f", sqrtf(e * e + no * no), brg);
           lv_label_set_text(id(sel_l4), b);
       - script.execute: fetch_route
+
+  - id: show_weather           # 無選取航班時,右下角面板顯示在地天氣(Open-Meteo)
+    mode: single
+    then:
+      - lambda: |-
+          lv_label_set_text(id(sel_cs_l), "LOCAL WX");
+          lv_label_set_text(id(sel_route_l), "TAP AIRCRAFT TO TRACK");
+          if (!radar_bg::g_wx_valid) {
+            lv_label_set_text(id(sel_l1), "WAITING FOR DATA ...");
+            lv_label_set_text(id(sel_l2), "");
+            lv_label_set_text(id(sel_l3), "");
+            lv_label_set_text(id(sel_l4), "");
+            return;
+          }
+          static const char *PTS[16] = { "N","NNE","NE","ENE","E","ESE","SE","SSE",
+                                         "S","SSW","SW","WSW","W","WNW","NW","NNW" };
+          char b[48];
+          snprintf(b, sizeof(b), "TEMP %6.1f C", radar_bg::g_wx.temp);
+          lv_label_set_text(id(sel_l1), b);
+          snprintf(b, sizeof(b), "HUM  %6.0f %%", radar_bg::g_wx.hum);
+          lv_label_set_text(id(sel_l2), b);
+          snprintf(b, sizeof(b), "WIND %6.1f km/h", radar_bg::g_wx.wspd);
+          lv_label_set_text(id(sel_l3), b);
+          float wd = radar_bg::g_wx.wdir;
+          if (wd < 0) wd = 0;
+          int pi = ((int) ((wd + 11.25f) / 22.5f)) % 16;
+          snprintf(b, sizeof(b), "DIR  %6.0f  %s", wd, PTS[pi]);
+          lv_label_set_text(id(sel_l4), b);
 
   - id: fetch_route            # adsbdb.com 查起訖機場(背景執行)
     mode: single
@@ -457,6 +494,19 @@ interval:
             lv_label_set_text(id(sel_route_l), radar_bg::g_route.c_str());
             xSemaphoreGive(radar_bg::mtx());
           }
+          // 在地天氣:開機 8 秒後首抓,之後每 10 分鐘;座標變更時 wx_last_ms 歸零強制重抓
+          if (millis() > 8000 && wifi::global_wifi_component->is_connected() &&
+              (id(wx_last_ms) == 0 || millis() - id(wx_last_ms) > 600000)) {
+            id(wx_last_ms) = millis();
+            radar_bg::request_weather(id(home_lat).state, id(home_lon).state);
+          }
+          if (radar_bg::g_wx_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_wx_ready = false;
+            xSemaphoreGive(radar_bg::mtx());
+            if (id(sel_cs_g).empty())
+              id(show_weather).execute();
+          }
           if (!radar_bg::g_states_ready) return;
           xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
           int n = radar_bg::g_result.size();
@@ -514,7 +564,7 @@ interval:
           if (first_data) {
             first_data = false;
             if (id(sel_cs_g).empty())
-              lv_label_set_text(id(sel_cs_l), "TAP AIRCRAFT");
+              id(show_weather).execute();   // 未選機:面板顯示在地天氣
           }
       # 航班點外插移動(每秒,依航向+地速推算目前位置)
       - lambda: |-
@@ -1462,7 +1512,7 @@ lvgl:
                   if (lo >= -180 && lo <= 180) {
                     auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
                   }
-                  if (rg >= 10 && rg <= 200) {
+                  if (rg >= 10 && rg <= 500) {
                     auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
                   }
               - lvgl.page.show: main_page
@@ -1721,7 +1771,7 @@ lvgl:
                   if (lo >= -180 && lo <= 180) {
                     auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
                   }
-                  if (rg >= 10 && rg <= 200) {
+                  if (rg >= 10 && rg <= 500) {
                     auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
                   }
               - lvgl.page.show: main_page

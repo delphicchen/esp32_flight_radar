@@ -29,7 +29,7 @@ struct AcInfo {
 };
 
 struct Job {
-  int type;  // 1 = states, 2 = route
+  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather
   std::string cid, sec, callsign;
   float lat, lon, range;
 };
@@ -42,6 +42,10 @@ inline volatile bool g_route_ready = false;
 inline uint8_t *g_echo_buf = nullptr;    // 離屏合成緩衝 456*456*3 (PSRAM)
 inline volatile bool g_echo_ready = false;   // true=g_echo_buf 有整幀待主迴圈換上
 inline volatile bool g_auth_fail = false;
+struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
+inline WxInfo g_wx;
+inline volatile bool g_wx_ready = false;   // true=g_wx 有新資料待主迴圈取用
+inline bool g_wx_valid = false;            // 曾成功抓過至少一次
 
 inline SemaphoreHandle_t mtx() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
@@ -193,6 +197,39 @@ inline void do_route(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
+// Open-Meteo 目前天氣(免金鑰、開源資料)→ g_wx
+inline void do_weather(const Job &j) {
+  char url[224];
+  snprintf(url, sizeof(url),
+           "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+           "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+           j.lat, j.lon);
+  int st = 0;
+  std::string r = http_req(url, false, "", nullptr, "", st);
+  if (st != 200 || r.empty()) {
+    ESP_LOGW("radar_bg", "weather failed: %d", st);
+    return;
+  }
+  WxInfo w{};
+  bool got = false;
+  esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+    JsonObject cur = root["current"];
+    if (cur.isNull()) return true;
+    w.temp = cur["temperature_2m"] | NAN;
+    w.hum  = cur["relative_humidity_2m"] | NAN;
+    w.wspd = cur["wind_speed_10m"] | NAN;
+    w.wdir = cur["wind_direction_10m"] | NAN;
+    got = !isnan(w.temp);
+    return true;
+  });
+  if (!got) { ESP_LOGW("radar_bg", "weather parse fail"); return; }
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_wx = w;
+  g_wx_valid = true;
+  g_wx_ready = true;
+  xSemaphoreGive(mtx());
+}
+
 // ---- pngle 解碼 context:把 tile 像素寫進 512x512 RGBA 暫存 ----
 struct PngCtx { uint8_t *rgba; int w, h; };
 
@@ -319,6 +356,7 @@ inline void task_fn(void *arg) {
       if (j->type == 1) do_states(*j);
       else if (j->type == 2) do_route(*j);
       else if (j->type == 3) do_echo(*j);
+      else if (j->type == 4) do_weather(*j);
       delete j;
     }
   }
@@ -342,6 +380,12 @@ inline void request_states(const std::string &cid, const std::string &sec,
 inline void request_echo(float lat, float lon, float range) {
   ensure_task();
   Job *j = new Job{3, "", "", "", lat, lon, range};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+}
+
+inline void request_weather(float lat, float lon) {
+  ensure_task();
+  Job *j = new Job{4, "", "", "", lat, lon, 0};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
 }
 
