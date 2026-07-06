@@ -89,7 +89,7 @@ All of these are Home Assistant / web entities, stored in NVS:
 |---------|---------|
 | OpenSky Client ID / Secret | OAuth2 API client credentials |
 | Home Latitude / Longitude | Radar center (your location) |
-| Radar Range | Scan radius in km (10–200) |
+| Radar Range | Scan radius in km (10–500) |
 | Poll Interval | Seconds between fetches (default 30 → 2880/day, within the 4000/day quota) |
 | Alarm Speaker | HA `media_player` entity to ring through |
 | Alarm Sound URL | mp3 to play when an alarm fires |
@@ -103,6 +103,7 @@ All of these are Home Assistant / web entities, stored in NVS:
 - Aircraft states — [OpenSky Network](https://opensky-network.org/)
 - Route lookup — [adsbdb.com](https://www.adsbdb.com/)
 - Weather radar — [RainViewer](https://www.rainviewer.com/)
+- Local weather — [Open-Meteo](https://open-meteo.com/)
 - Taiwan boundaries — [g0v/twgeojson](https://github.com/g0v/twgeojson)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
@@ -178,7 +179,7 @@ esphome run radar.yaml
 |------|------|
 | OpenSky Client ID / Secret | OAuth2 API 憑證 |
 | Home Latitude / Longitude | 雷達中心(你的位置) |
-| Radar Range | 掃描半徑(公里,10–200) |
+| Radar Range | 掃描半徑(公里,10–500) |
 | Poll Interval | 抓取間隔秒數(預設 30 → 每日 2880 次,在 4000 次/日額度內) |
 | Alarm Speaker | 用來發聲的 HA `media_player` 實體 |
 | Alarm Sound URL | 鬧鐘響時播放的 mp3 |
@@ -192,10 +193,17 @@ esphome run radar.yaml
 - 航班狀態 — [OpenSky Network](https://opensky-network.org/)
 - 航線查詢 — [adsbdb.com](https://www.adsbdb.com/)
 - 氣象雷達 — [RainViewer](https://www.rainviewer.com/)
+- 在地天氣 — [Open-Meteo](https://open-meteo.com/)
 - 台灣界線 — [g0v/twgeojson](https://github.com/g0v/twgeojson)
 - 概念啟發 — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 請遵守各資料來源的免費方案條款;本專案是自用興趣作品,並非商業服務。
+
+---
+
+## 🔗 Links / 友链
+
+- 非常感谢 [LINUX DO](https://linux.do/latest) 社区提供的交流平台 / Many thanks to the LINUX DO community for the great discussion platform.
 
 ---
 
