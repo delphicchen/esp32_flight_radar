@@ -55,8 +55,9 @@ esp32:
       CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
 
 psram:
-  mode: octal
+  mode: octal     # this project needs octal PSRAM; quad boards can't feed the RGB panel
   speed: 120MHz   # 原廠 sdkconfig 即為 120MHz;80MHz 頻寬不足會撕裂/雜訊
+                  # vendor sdkconfig uses 120MHz; at 80MHz the bandwidth is too low -> tearing/noise
 
 logger:
   level: INFO
@@ -746,10 +747,19 @@ interval:
                      id(home_lat).state, id(home_lon).state, id(radar_range).state);
             return std::string(buf);
 
-# ---- 背光 ----
+# =====================================================================
+#  Hardware pin map / 硬體腳位定義
+#  Board: generic "esp32-s3-5inch-rgb-001" (ESP32-S3, 16MB flash,
+#  8MB octal PSRAM, 800x480 ST7262 parallel-RGB panel, GT911 touch).
+#  Using a different S3 + 800x480 RGB + GT911 board? Edit the pins and
+#  panel timings below to match your board's schematic - see README
+#  "Compatible boards".
+# =====================================================================
+
+# ---- 背光 Backlight (LEDC PWM) ----
 output:
   - platform: ledc
-    pin: GPIO1
+    pin: GPIO1                  # backlight PWM
     id: bl_pwm
     frequency: 1000Hz
 
@@ -760,10 +770,10 @@ light:
     name: Backlight
     restore_mode: RESTORE_DEFAULT_ON
 
-# ---- 觸控 ----
+# ---- 觸控 Touch (GT911, I2C) ----
 i2c:
-  sda: GPIO16
-  scl: GPIO15
+  sda: GPIO16                   # GT911 SDA
+  scl: GPIO15                   # GT911 SCL
   frequency: 400kHz
 
 touchscreen:
@@ -805,29 +815,29 @@ image:
     type: RGB565
     transparency: alpha_channel
 
-# ---- 螢幕(交給 LVGL 驅動:不自動更新、不自動清屏)----
+# ---- 螢幕 Display(parallel RGB / DPI panel, driven by LVGL:交給 LVGL 驅動,不自動更新、不自動清屏)----
 display:
   - platform: rpi_dpi_rgb
     id: main_display
     update_interval: never
     auto_clear_enabled: false
     color_order: RGB
-    pclk_frequency: 17MHz
+    pclk_frequency: 17MHz       # pixel clock; panel timing below comes from the vendor datasheet
     pclk_inverted: true
     dimensions:
       width: 800
       height: 480
-    de_pin: GPIO40
-    hsync_pin: GPIO38
-    vsync_pin: GPIO39
-    pclk_pin: GPIO41
+    de_pin: GPIO40              # data enable
+    hsync_pin: GPIO38           # horizontal sync
+    vsync_pin: GPIO39           # vertical sync
+    pclk_pin: GPIO41            # pixel clock
     hsync_pulse_width: 8
     hsync_back_porch: 8
     hsync_front_porch: 4
     vsync_pulse_width: 8
     vsync_back_porch: 8
     vsync_front_porch: 4
-    data_pins:
+    data_pins:                  # RGB565: R0-R4 / G0-G5 / B0-B4, LSB first
       red: [46, 3, 8, 18, 17]
       green: [14, 13, 12, 11, 10, 9]
       blue: [0, 45, 48, 47, 21]

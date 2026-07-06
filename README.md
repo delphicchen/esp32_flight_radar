@@ -44,6 +44,17 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 | Power | USB-C |
 | Enclosure | 3D-printable case ships with the board's SDK |
 
+#### Compatible boards
+
+The exact board is a generic **"esp32-s3-5inch-rgb-001"** panel sold on AliExpress/Taobao, but nothing in the firmware is vendor-specific. Any board that matches this combo should work after editing the pin map:
+
+- **ESP32-S3** with **8 MB octal PSRAM** — required; quad-PSRAM boards cannot feed the RGB panel (the config runs PSRAM at 120 MHz octal)
+- **800×480 parallel-RGB (DPI) display** — the `rpi_dpi_rgb` driver is used; SPI / QSPI / MIPI panels would need a different display platform
+- **GT911** I²C touch controller (FT5x06 / CST8xx need a different `touchscreen` platform)
+- **16 MB flash** — or change `flash_size` in `radar.yaml` (the firmware itself is ~1.4 MB)
+
+Candidates include the Waveshare ESP32-S3-Touch-LCD-5, Sunton ESP32-8048S050 and Guition JC8048W550. To port: edit the backlight / I²C / RGB pins and the panel timings in the **Hardware pin map** section of `radar.yaml` to match your board's schematic. The UI layout is fixed at 800×480 landscape — other resolutions need a layout rework.
+
 ### Software requirements
 
 - [ESPHome](https://esphome.io/) 2025.7 or newer (`pip install esphome`)
@@ -158,6 +169,17 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 | 觸控 | GT911 電容式(I²C) |
 | 供電 | USB-C |
 | 外殼 | 方案板 SDK 附 3D 列印外殼檔 |
+
+#### 相容板子
+
+本專案用的是淘寶/AliExpress 常見的白牌 **「esp32-s3-5inch-rgb-001」** 方案板,但韌體沒有綁定任何廠商。符合以下組合的板子改腳位後都能用:
+
+- **ESP32-S3 + 8 MB octal PSRAM** — 必要;quad PSRAM 頻寬餵不動 RGB 屏(設定跑 120 MHz octal)
+- **800×480 平行 RGB(DPI)螢幕** — 使用 `rpi_dpi_rgb` 驅動;SPI / QSPI / MIPI 屏需要換 display 平台
+- **GT911** I²C 觸控(FT5x06 / CST8xx 要換 `touchscreen` 平台)
+- **16 MB flash** — 或修改 `radar.yaml` 的 `flash_size`(韌體本身約 1.4 MB)
+
+可行的例子:Waveshare ESP32-S3-Touch-LCD-5、Sunton ESP32-8048S050、Guition JC8048W550。移植方式:照你板子的原理圖修改 `radar.yaml` 中 **Hardware pin map** 區的背光 / I²C / RGB 腳位與面板時序即可。UI 版面寫死 800×480 橫向,其他解析度需要重排版面。
 
 ### 軟體需求
 
