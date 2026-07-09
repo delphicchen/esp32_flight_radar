@@ -13,6 +13,10 @@
 #include "freertos/queue.h"
 #include "esp_http_client.h"
 #include "esp_heap_caps.h"
+#include "esp_flash.h"
+#include "esp_ota_ops.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 extern "C" {
 #include "pngle.h"
 }
@@ -427,50 +431,112 @@ inline void request_route(const std::string &cs) {
 
 }  // namespace radar_bg
 
-// ---- 台灣輪廓層:畫到 456x456 canvas(中心 228,228,半徑 226px)----
-inline void radar_draw_map(lv_obj_t *cv, float lat0, float lon0, float rng, bool show) {
-  lv_canvas_fill_bg(cv, lv_color_black(), LV_OPA_TRANSP);
-  if (show) {
-    float coslat = cosf(lat0 * 3.14159265f / 180.0f);
-    lv_draw_line_dsc_t dsc;
-    lv_draw_line_dsc_init(&dsc);
-    dsc.color = lv_color_hex(0xD8C878);   // 淡黃色輪廓線
-    dsc.width = 1;
-    dsc.opa = LV_OPA_COVER;
-    float r2 = rng * rng;
-    bool have_prev = false;
-    lv_point_t prev{0, 0};
-    float pd2 = 1e18f;
-    for (int i = 0; i + 1 < MAP_OUTLINE_LEN; i += 2) {
-      float la = MAP_OUTLINE[i], lo = MAP_OUTLINE[i + 1];
-      if (isnan(la)) { have_prev = false; continue; }
-      float e = (lo - lon0) * 111.320f * coslat;
-      float n = (la - lat0) * 110.574f;
-      float d2 = e * e + n * n;
-      lv_point_t p;
-      p.x = (lv_coord_t) (228 + e / rng * 226.0f);
-      p.y = (lv_coord_t) (228 - n / rng * 226.0f);
-      if (have_prev && (d2 <= r2 || pd2 <= r2)) {
-        lv_point_t seg[2] = {prev, p};
-        lv_canvas_draw_line(cv, seg, 2, &dsc);
+// ---- 底圖層:底色+輪廓(快取)+ 預混合回波 + 距離環/十字線 → 單一不透明 canvas ----
+// 貴的輪廓重畫(逐段 draw context,~40ms)只在座標/範圍/MAP 開關變更時做並存入快取;
+// 平時重建 = memcpy 快取 + 回波混色 + 畫環,~15ms。距離環/十字線內容不變但位於
+// map/echo 之上,烤進底圖後每幀連這幾個 widget 的圓弧邊框繪製也省掉。
+// alpha 混色只在資料更新時做這一次,之後每幀渲染對這層只剩不透明 blit(省 PSRAM 頻寬)。
+inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
+                               bool map_show, bool echo_show) {
+  lv_img_dsc_t *img = lv_canvas_get_img(cv);
+  if (!img || !img->data) return;
+  const size_t BYTES = (size_t) 456 * 456 * sizeof(lv_color_t);
+  static uint8_t *cache = nullptr;   // 底色+輪廓快取(PSRAM,416KB)
+  if (!cache) cache = (uint8_t *) heap_caps_malloc(BYTES, MALLOC_CAP_SPIRAM);
+  static float c_lat = NAN, c_lon = NAN, c_rng = NAN;
+  static bool c_map = false;
+  bool fresh = cache && c_lat == lat0 && c_lon == lon0 && c_rng == rng && c_map == map_show;
+  if (fresh) {
+    memcpy((void *) img->data, cache, BYTES);
+  } else {
+    lv_canvas_fill_bg(cv, lv_color_hex(0x040C08), LV_OPA_COVER);
+    if (map_show) {
+      float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+      lv_draw_line_dsc_t dsc;
+      lv_draw_line_dsc_init(&dsc);
+      dsc.color = lv_color_hex(0xD8C878);   // 淡黃色輪廓線
+      dsc.width = 1;
+      dsc.opa = LV_OPA_COVER;
+      float r2 = rng * rng;
+      bool have_prev = false;
+      lv_point_t prev{0, 0};
+      float pd2 = 1e18f;
+      for (int i = 0; i + 1 < MAP_OUTLINE_LEN; i += 2) {
+        float la = MAP_OUTLINE[i], lo = MAP_OUTLINE[i + 1];
+        if (isnan(la)) { have_prev = false; continue; }
+        float e = (lo - lon0) * 111.320f * coslat;
+        float n = (la - lat0) * 110.574f;
+        float d2 = e * e + n * n;
+        lv_point_t p;
+        p.x = (lv_coord_t) (228 + e / rng * 226.0f);
+        p.y = (lv_coord_t) (228 - n / rng * 226.0f);
+        if (have_prev && (d2 <= r2 || pd2 <= r2)) {
+          lv_point_t seg[2] = {prev, p};
+          lv_canvas_draw_line(cv, seg, 2, &dsc);
+        }
+        prev = p;
+        pd2 = d2;
+        have_prev = true;
       }
-      prev = p;
-      pd2 = d2;
-      have_prev = true;
+    }
+    if (cache) {
+      memcpy(cache, img->data, BYTES);
+      c_lat = lat0; c_lon = lon0; c_rng = rng; c_map = map_show;
     }
   }
+  // 回波預混合:g_echo_buf 為 [color_lo][color_hi][alpha],逐像素混進底圖
+  if (echo_show && radar_bg::g_echo_buf) {
+    lv_color_t *dst = (lv_color_t *) (void *) img->data;
+    const uint8_t *sp = radar_bg::g_echo_buf;
+    for (size_t px = 0; px < (size_t) 456 * 456; px++, sp += 3) {
+      if (sp[2] < 8) continue;   // 無降雨=透明,保留底圖
+      lv_color_t fg;
+      fg.full = (uint16_t) sp[0] | ((uint16_t) sp[1] << 8);
+      dst[px] = lv_color_mix(fg, dst[px], sp[2]);
+    }
+  }
+  // 十字線與 4 圈距離環:蓋在回波上,顏色/位置與原 widget 版一致
+  lv_draw_line_dsc_t xd;
+  lv_draw_line_dsc_init(&xd);
+  xd.color = lv_color_hex(0x003820);
+  xd.width = 1;
+  lv_point_t xh[2] = {{0, 228}, {456, 228}};
+  lv_canvas_draw_line(cv, xh, 2, &xd);
+  lv_point_t xv[2] = {{228, 0}, {228, 456}};
+  lv_canvas_draw_line(cv, xv, 2, &xd);
+  lv_draw_arc_dsc_t ad;
+  lv_draw_arc_dsc_init(&ad);
+  ad.color = lv_color_hex(0x006030);
+  ad.width = 1;
+  static const lv_coord_t RINGS[4] = {228, 171, 114, 57};
+  for (int k = 0; k < 4; k++)
+    lv_canvas_draw_arc(cv, 228, 228, RINGS[k], 0, 360, &ad);
   lv_obj_invalidate(cv);
 }
 
-// ---- 回波層:清空可見 canvas / 把離屏緩衝換上 ----
-inline void radar_echo_clear(lv_obj_t *cv) {
-  lv_img_dsc_t *d = lv_canvas_get_img(cv);
-  if (d && d->data) memset((void *) d->data, 0, (size_t) 456 * 456 * 3);
-  lv_obj_invalidate(cv);
-}
-inline void radar_echo_present(lv_obj_t *cv) {   // 主迴圈呼叫:一次 memcpy 換上整幀
-  lv_img_dsc_t *d = lv_canvas_get_img(cv);
-  if (d && d->data && radar_bg::g_echo_buf)
-    memcpy((void *) d->data, radar_bg::g_echo_buf, (size_t) 456 * 456 * 3);
-  lv_obj_invalidate(cv);
+// ---- 系統資訊(i 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 填入右下角六個 label ----
+inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
+                               lv_obj_t *l2, lv_obj_t *l3, lv_obj_t *l4, int rssi) {
+  char b[48];
+  lv_label_set_text(cs, "SYSTEM");
+  snprintf(b, sizeof(b), "ESP32-S3  CPU %u MHz", (unsigned) esp_rom_get_cpu_ticks_per_us());
+  lv_label_set_text(route, b);
+  snprintf(b, sizeof(b), "RAM   %4u / %4u KB",
+           (unsigned) (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+           (unsigned) (heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024));
+  lv_label_set_text(l1, b);
+  snprintf(b, sizeof(b), "PSRAM %4u / %4u KB",
+           (unsigned) (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+           (unsigned) (heap_caps_get_total_size(MALLOC_CAP_SPIRAM) / 1024));
+  lv_label_set_text(l2, b);
+  uint32_t fsz = 0;
+  esp_flash_get_size(nullptr, &fsz);
+  const esp_partition_t *ap = esp_ota_get_running_partition();
+  snprintf(b, sizeof(b), "FLASH %u MB   APP %.1f MB", (unsigned) (fsz >> 20),
+           ap ? ap->size / 1048576.0f : 0.0f);
+  lv_label_set_text(l3, b);
+  uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
+  snprintf(b, sizeof(b), "UP %ud %02u:%02u   RSSI %d", (unsigned) (up / 86400),
+           (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60), rssi);
+  lv_label_set_text(l4, b);
 }

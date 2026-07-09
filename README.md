@@ -30,7 +30,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 - **Weather echo overlay** — optional rain-radar layer from [RainViewer](https://www.rainviewer.com/), downloaded, decoded and composited **entirely on a background core** so the UI never stutters. Toggle with an on-screen button.
 - **Map outline overlay** — optional coastline / administrative border layer (Taiwan by default), toggle on screen.
 - **Home Assistant integration** — the device auto-discovers in HA; backlight, Wi-Fi signal and buttons become HA entities.
-- **Alarm clock** — up to 4 alarms, each with per-weekday scheduling. Alarms ring through a **Home Assistant media player** (any Wi-Fi speaker). On-screen **Snooze / Dismiss** overlay when ringing.
+- **Alarm clock** — up to 4 alarms, each with per-weekday scheduling. Alarms ring through a **Home Assistant media player** (any Wi-Fi speaker); **each alarm can ring on its own speaker** (e.g. weekday alarm in the bedroom, weekend alarm in the living room). On-screen **Snooze / Dismiss** overlay when ringing.
 - **Fully on-device setup** — first boot opens a Wi-Fi captive portal. Coordinates, scan range, poll interval, OpenSky credentials and the alarm speaker can all be entered **on the touch screen** (or via the web page / Home Assistant). Everything is stored in NVS and survives reboots.
 - **OTA updates** — after the first USB flash, all future updates are wireless.
 
@@ -80,7 +80,7 @@ First flash must be over **USB** (`/dev/ttyUSB0` or `/dev/ttyACM0`; add yourself
 
 ### Alarm clock
 
-- Tap the **clock** to open the alarm page (4 slots). For each: enable, set hour / minute, and choose the weekdays.
+- Tap the **clock** to open the alarm page (4 slots). For each: enable, tap the time to open a large scroll-wheel time picker, choose the weekdays, and (optionally) pick that alarm's own speaker from the dropdown at the end of its row.
 - In the config fields set **Alarm Speaker** (a Home Assistant `media_player` entity, e.g. `media_player.living_room`) and optionally **Alarm Sound URL** (an mp3).
 - In Home Assistant, open the device page and enable **"Allow the device to perform Home Assistant actions."** Otherwise the ESP32 cannot command the speaker.
 - When an alarm fires, a **SNOOZE 9m / DISMISS** panel appears on screen. The sound **re-plays every 15 s until you press DISMISS**, so a short mp3 still keeps ringing.
@@ -98,7 +98,7 @@ Instead of typing the entity id by hand, the alarm page can list every `media_pl
 
 1. In Home Assistant open your **profile (bottom-left avatar) → Security → Long-lived access tokens → Create token**. Copy it — it is shown only once.
 2. Open the device's web page at `http://flight-radar.local` (or the device page in HA) and paste the token into **HA Token**. **HA URL** can stay empty — it defaults to `http://homeassistant.local:8123`; if the scan later reports `HA UNREACHABLE`, set it to your HA address by IP instead (e.g. `http://192.168.1.10:8123` — mDNS name resolution is unreliable on some networks). Both fields are saved to flash and survive reboots.
-3. On the alarm page press **SCAN**. The dropdown fills with all speakers by friendly name; pick one and it is written to **Alarm Speaker** immediately. Manual entry still works too.
+3. Open the alarm page — it **scans automatically** on entry once the token is set (or press **SCAN** in the top bar). All speaker dropdowns fill with friendly names: the **DEF** dropdown in the top bar is the default speaker (used by any alarm without its own), and each alarm row ends with that alarm's own dropdown. Picking a speaker saves immediately. Manual entry still works too (entities **Alarm Speaker** and **Alarm 1–4 Speaker**; leave an alarm's entry empty to use the default).
 
 Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = the token is wrong or was revoked; `HA UNREACHABLE` = wrong HA URL / use the IP; `NO SPEAKERS FOUND` = HA has no `media_player` entities (add the Google Cast / Sonos / etc. integration first).
 
@@ -116,7 +116,8 @@ All of these are Home Assistant / web entities, stored in NVS:
 | Poll Interval | Seconds between fetches (default 30 → 2880/day, within the 4000/day quota) |
 | HA URL | Home Assistant address for speaker scan (empty = `http://homeassistant.local:8123`) |
 | HA Token | HA long-lived access token used by the SCAN button |
-| Alarm Speaker | HA `media_player` entity to ring through (type it or use SCAN) |
+| Alarm Speaker | Default HA `media_player` entity to ring through (type it or use SCAN) |
+| Alarm 1–4 Speaker | Per-alarm speaker override; empty = use Alarm Speaker |
 | Alarm Sound URL | mp3 to play when an alarm fires |
 
 ### Using it outside Taiwan
@@ -156,7 +157,7 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 - **氣象回波圖層** — 可選的降雨雷達層,資料來自 [RainViewer](https://www.rainviewer.com/);下載、解碼、合成**全部在背景核心完成**,主畫面完全不卡。以螢幕按鈕開關。
 - **地圖輪廓圖層** — 可選的海岸線 / 行政區界(預設台灣),螢幕按鈕開關。
 - **Home Assistant 整合** — 裝置會自動被 HA 探索;背光、Wi-Fi 訊號與按鈕都成為 HA 實體。
-- **鬧鐘** — 最多 4 組,每組可設定特定星期幾。鬧鐘透過 **Home Assistant 的媒體播放器**(任何 Wi-Fi 喇叭)發聲。響鈴時螢幕出現**貪睡 / 關閉**面板。
+- **鬧鐘** — 最多 4 組,每組可設定特定星期幾。鬧鐘透過 **Home Assistant 的媒體播放器**(任何 Wi-Fi 喇叭)發聲,且**每組鬧鐘可指定不同喇叭**(例如平日鬧鐘在臥室響、週末鬧鐘在客廳響)。響鈴時螢幕出現**貪睡 / 關閉**面板。
 - **完全在裝置上設定** — 首次開機開啟 Wi-Fi 設定熱點。座標、掃描半徑、輪詢間隔、OpenSky 憑證、鬧鐘喇叭都可以**直接在觸控螢幕上輸入**(也可透過網頁 / Home Assistant)。全部存於 NVS,重開機保留。
 - **OTA 無線更新** — 第一次用 USB 燒錄後,之後都能無線更新。
 
@@ -206,7 +207,7 @@ esphome run radar.yaml
 
 ### 鬧鐘
 
-- 點**時鐘**開啟鬧鐘頁(4 組)。每組:啟用、設定時 / 分、選擇星期幾。
+- 點**時鐘**開啟鬧鐘頁(4 組)。每組:啟用、點時間彈出大型捲輪選擇器設定時 / 分、選擇星期幾,列尾的下拉選單可(選擇性)指定該組專屬喇叭。
 - 在設定欄位填入 **Alarm Speaker**(Home Assistant 的 `media_player` 實體,例如 `media_player.living_room`),以及可選的 **Alarm Sound URL**(mp3)。
 - 在 Home Assistant 的裝置頁開啟「**允許此裝置執行 Home Assistant 動作**」,否則 ESP32 無法命令喇叭。
 - 鬧鐘響時,螢幕會出現 **SNOOZE 9m / DISMISS** 面板。聲音會**每 15 秒重播一次,直到你按下 DISMISS**,所以短音檔也能持續響。
@@ -224,7 +225,7 @@ esphome run radar.yaml
 
 1. 在 Home Assistant 開啟**個人資料(左下角頭像)→ 安全性 → 長期存取權杖 → 建立權杖**,複製起來——它只會顯示這一次。
 2. 開啟裝置網頁 `http://flight-radar.local`(或 HA 的裝置頁),把權杖貼進 **HA Token**。**HA URL** 可以留空——預設 `http://homeassistant.local:8123`;若之後掃描顯示 `HA UNREACHABLE`,請改填 HA 的 IP(如 `http://192.168.1.10:8123`,mDNS 名稱解析在部分網路不可靠)。兩個欄位都會存進 flash,重開機不會消失。
-3. 到鬧鐘頁按 **SCAN**,下拉選單就會列出所有喇叭(顯示友善名稱);點選後立即寫入 **Alarm Speaker**。仍然可以手動填寫。
+3. 開啟鬧鐘頁——權杖填好後**進頁會自動掃描**(也可按頂列的 **SCAN**)。所有喇叭下拉選單會列出友善名稱:頂列 **DEF** 選單是預設喇叭(沒有專屬喇叭的鬧鐘用它),每組鬧鐘列尾則是該組的專屬選單。挑了就立即存檔。仍然可以手動填寫(實體 **Alarm Speaker** 與 **Alarm 1–4 Speaker**;某組留空 = 用預設)。
 
 疑難排解:`SET HA TOKEN FIRST` = 還沒做第 2 步;`TOKEN INVALID` = 權杖錯誤或已撤銷;`HA UNREACHABLE` = HA URL 不對,改用 IP;`NO SPEAKERS FOUND` = HA 裡沒有任何 `media_player` 實體(先新增 Google Cast / Sonos 等整合)。
 
@@ -242,7 +243,8 @@ esphome run radar.yaml
 | Poll Interval | 抓取間隔秒數(預設 30 → 每日 2880 次,在 4000 次/日額度內) |
 | HA URL | 喇叭掃描用的 HA 位址(留空 = `http://homeassistant.local:8123`) |
 | HA Token | SCAN 鈕使用的 HA 長期存取權杖 |
-| Alarm Speaker | 用來發聲的 HA `media_player` 實體(手填或用 SCAN 選) |
+| Alarm Speaker | 預設發聲的 HA `media_player` 實體(手填或用 SCAN 選) |
+| Alarm 1–4 Speaker | 各組鬧鐘的專屬喇叭;留空 = 用 Alarm Speaker |
 | Alarm Sound URL | 鬧鐘響時播放的 mp3 |
 
 ### 在台灣以外地區使用

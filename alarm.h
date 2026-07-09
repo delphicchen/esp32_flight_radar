@@ -23,6 +23,8 @@ inline uint32_t set_en(uint32_t a, bool e) { return pack(e, dow(a), hh(a), mm(a)
 inline uint32_t toggle_en(uint32_t a)      { return set_en(a, !en(a)); }
 inline uint32_t add_h(uint32_t a, int d)   { return pack(en(a), dow(a), (hh(a) + d + 24) % 24, mm(a)); }
 inline uint32_t add_m(uint32_t a, int d)   { return pack(en(a), dow(a), hh(a), (mm(a) + d + 60) % 60); }
+inline uint32_t set_h(uint32_t a, int h)   { return pack(en(a), dow(a), h, mm(a)); }
+inline uint32_t set_m(uint32_t a, int m)   { return pack(en(a), dow(a), hh(a), m); }
 inline uint32_t toggle_day(uint32_t a, int k) {   // k=0..6 (一..日)
   return pack(en(a), dow(a) ^ (uint8_t)(1u << k), hh(a), mm(a));
 }
