@@ -27,6 +27,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 - **Live flight radar** — pulls aircraft states from the [OpenSky Network](https://opensky-network.org/) around your coordinates and plots them on a 480×480 radar scope with a rotating sweep, fading trail, and target glow as the beam passes each aircraft.
 - **ATC-style labels** — each aircraft shows its callsign, flight level and speed, with a heading-oriented plane icon. Tap any aircraft to see its **origin → destination** (via [adsbdb.com](https://www.adsbdb.com/)), altitude, speed, heading, vertical rate, distance and bearing.
+- **ATC mode** — toggle button switches the plane icons to bare **target squares** with a **2‑minute velocity vector**, a **3‑point fading history trail**, and a local **STCA-style conflict alert** (two aircraft within 5.5 km / 300 m get flagged red); stale data (no update for 60 s) is flagged yellow with a `*` suffix. Turn it off to instantly restore the normal plane-icon view.
 - **Weather echo overlay** — optional rain-radar layer from [RainViewer](https://www.rainviewer.com/), downloaded, decoded and composited **entirely on a background core** so the UI never stutters. Toggle with an on-screen button.
 - **Map outline overlay** — optional coastline / administrative border layer (Taiwan by default), toggle on screen.
 - **Home Assistant integration** — the device auto-discovers in HA; backlight, Wi-Fi signal and buttons become HA entities.
@@ -104,6 +105,19 @@ Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = t
 
 > **Security note:** a long-lived token grants full access to your Home Assistant and is stored in the device's flash. Treat it like a password and keep the device on a trusted network — the firmware only uses it for this read-only speaker query.
 
+### ATC mode
+
+Press the **ATC** button (in the top-right button row, between **ECHO** and **PWR**) to switch the radar from plane icons to an air-traffic-control style view; press again to instantly restore the default view.
+
+- Each aircraft becomes a small **green target square**. Tap it exactly like the plane icon to select/deselect (same `select_slot` behavior).
+- A thin line projects each aircraft's **position 2 minutes ahead** based on its current heading and ground speed.
+- A **3-point fading trail** shows its last few fetched positions.
+- Labels switch to two lines: callsign on top, `FL<flight level><climb arrow><speed>kt` below (`^` climbing, `v` descending, `=` level).
+- **Conflict alert (red):** any two aircraft within **5.5 km** horizontally *and* **300 m** vertically both turn red; if one of them is the selected aircraft it blinks white/red instead of solid white.
+- **Stale data (yellow):** if OpenSky hasn't updated an aircraft in over 60 s, its label turns yellow and gets a trailing `*`.
+- Selected aircraft (no conflict) stay white.
+- **Static video map:** ATC mode also bakes the `map_data.h` overlays into the base layer — airspace boundaries (CTR-class zones brighter blue, TMA/CTA dimmer), runways with **dashed extended centerlines**, airport squares with ICAO codes, and navaid/fix triangles with names. All of it disappears when ATC mode is switched off.
+
 ### Configuration reference
 
 All of these are Home Assistant / web entities, stored in NVS:
@@ -134,6 +148,32 @@ python tools/make_map.py --lat 51.5074 --lon -0.1278 --radius 300 --states
 
 The script (pure Python, no packages needed) downloads [Natural Earth](https://www.naturalearthdata.com/) 1:10m coastline + country border data (public domain, cached in `tools/cache/`), clips it around your coordinates, simplifies it to roughly one radar pixel of detail, and overwrites `map_data.h`. Set `--radius` to the largest radar range you plan to use. Useful options: `--states` adds admin-1 borders (can be dense in some countries), `--geojson file.geojson` uses your own boundary file instead of downloading, `--tol` / `--max-points` control detail.
 
+The script also generates **ATC overlay data** (`AIRPORTS[]`, `RUNWAYS[]`, `FIXES[]`, `AIRSPACES[]`) into the same `map_data.h`. A complete run that produces everything at once:
+
+```bash
+# Taipei, 200 km: outline + airports & runways + navaids + 5-letter fixes + CTR/TMA airspaces
+python tools/make_map.py --lat 25.03 --lon 121.56 --radius 200 \
+    --countries TW --min-airport small --rwy-ext 15 \
+    --fixes-csv my_fixes.csv --openaip-key YOURKEY
+```
+
+| Flag | What it does |
+|------|--------------|
+| `--countries TW` | restrict airports/navaids to these ISO country codes (omit = everything in range) |
+| `--min-airport small` | also include small airfields (default `medium`; scheduled-service ones are always kept) |
+| `--rwy-ext 15` | runway centerline extension in km (default 10) |
+| `--fixes-csv my_fixes.csv` | add 5-letter AIP waypoints, one `NAME,lat,lon` per line |
+| `--openaip-key YOURKEY` | fetch CTR/TMA/CTA airspaces from [openAIP](https://www.openaip.net/) (free account, data CC BY-NC); alternatively `--airspace-geojson file.geojson` (features need `name` + `type` properties), `--airspace-types` picks the classes |
+| `--no-outline` | keep the `MAP_OUTLINE` already in the file (e.g. the stock g0v Taiwan outline), refresh overlays only |
+| `--no-airports` / `--no-fixes` | skip those overlays entirely |
+
+Airports, runways and navaids come from [OurAirports](https://ourairports.com/) open data (public domain, no key needed). Without an airspace source, `AIRSPACES[]` is simply empty. Note that openAIP coverage is community-maintained and varies a lot by region — Europe is dense, but **Taiwan has zero airspace data there**. For Taiwan the repo bundles `tools/taiwan_airspace.geojson` (FIR + 6 TMAs + 21 airport control zones), converted from the CAA eAIP ENR 2.1 with `tools/eaip_enr21_to_geojson.py` — that converter works on any IDS-AIRNAV-style eAIP ENR 2.1 page (handles coordinate lists, circles and arcs), so other un-covered countries can use the same route. The stock `map_data.h` was produced with:
+
+```bash
+python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no-outline \
+    --airspace-geojson tools/taiwan_airspace.geojson
+```
+
 ### Data sources & credits
 
 - Aircraft states — [OpenSky Network](https://opensky-network.org/)
@@ -142,6 +182,9 @@ The script (pure Python, no packages needed) downloads [Natural Earth](https://w
 - Local weather — [Open-Meteo](https://open-meteo.com/)
 - Taiwan boundaries — [g0v/twgeojson](https://github.com/g0v/twgeojson)
 - World map data — [Natural Earth](https://www.naturalearthdata.com/) (public domain)
+- Airports / runways / navaids — [OurAirports](https://ourairports.com/) (public domain)
+- Taiwan airspace boundaries — [Taiwan CAA eAIP](https://ais.caa.gov.tw/) ENR 2.1
+- Airspace boundaries elsewhere (optional) — [openAIP](https://www.openaip.net/) (CC BY-NC)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 Please respect each provider's free-tier terms; this project is a hobby build, not a service.
@@ -154,6 +197,7 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 
 - **即時航班雷達** — 從 [OpenSky Network](https://opensky-network.org/) 取得你座標周圍的航班,繪製在 480×480 雷達盤上,附旋轉掃描線、漸暗餘暉,以及掃描線掃過飛機時的高亮效果。
 - **航管風格標籤** — 每架飛機顯示呼號、飛航高度層與速度,搭配依航向旋轉的飛機圖示。點選任一飛機可查看**起點 → 目的地**(透過 [adsbdb.com](https://www.adsbdb.com/))、高度、速度、航向、垂直速率、距離與方位。
+- **ATC 模式** — 按鈕切換,飛機圖示換成純**目標方塊**,附**未來 2 分鐘速度向量線**、**3 點漸淡歷史軌跡**,以及本地端 **STCA 風格衝突告警**(兩機水平距離 < 5.5km 且高度差 < 300m 觸發紅色);資料超過 60 秒未更新則標為黃色並加 `*`。再按一次立即還原成預設的飛機圖示畫面。
 - **氣象回波圖層** — 可選的降雨雷達層,資料來自 [RainViewer](https://www.rainviewer.com/);下載、解碼、合成**全部在背景核心完成**,主畫面完全不卡。以螢幕按鈕開關。
 - **地圖輪廓圖層** — 可選的海岸線 / 行政區界(預設台灣),螢幕按鈕開關。
 - **Home Assistant 整合** — 裝置會自動被 HA 探索;背光、Wi-Fi 訊號與按鈕都成為 HA 實體。
@@ -231,6 +275,19 @@ esphome run radar.yaml
 
 > **安全性提醒:**長期權杖等同 HA 的完整存取權,且儲存在裝置 flash 中。請把它當密碼看待、讓裝置留在信任的內網;韌體只會用它做這個唯讀的喇叭查詢。
 
+### ATC 模式
+
+按右上角按鈕列的 **ATC** 鈕(在 **ECHO** 與 **PWR** 之間)切換成航管風格畫面;再按一次立即還原成預設的飛機圖示畫面。
+
+- 每架飛機變成一個小小的**綠色目標方塊**,點擊方式跟飛機圖示一樣(照樣呼叫 `select_slot` 選取/取消選取)。
+- 一條細線依目前航向與地速,投射該機**2 分鐘後的推算位置**。
+- **3 點漸淡軌跡**顯示最近幾次抓取到的舊位置。
+- 標籤改成兩行:第一行呼號,第二行 `FL高度層+爬升符號+速度kt`(`^` 爬升、`v` 下降、`=` 平飛)。
+- **衝突告警(紅色)**:任兩機水平距離 < **5.5 km** 且高度差 < **300 m** 時雙雙變紅;若其中一台是目前選取的飛機,改成白/紅交替閃爍而非純白。
+- **資料延遲(黃色)**:OpenSky 超過 60 秒沒更新該機資料,標籤變黃並在呼號後加 `*`。
+- 選取中且無衝突的飛機維持白色。
+- **靜態航圖(video map)**:ATC 模式同時把 `map_data.h` 的圖層烤進底圖——管制空域邊界(CTR 類亮藍、TMA/CTA 暗藍)、跑道與**虛線延伸中線**、機場方塊+ICAO 代碼、導航點三角+名稱。關閉 ATC 模式即全部消失。
+
 ### 設定項一覽
 
 以下皆為 Home Assistant / 網頁實體,存於 NVS:
@@ -261,6 +318,32 @@ python tools/make_map.py --lat 51.5074 --lon -0.1278 --radius 300 --states
 
 腳本(純 Python,免裝套件)會下載 [Natural Earth](https://www.naturalearthdata.com/) 1:10m 海岸線+國界資料(public domain,快取於 `tools/cache/`),裁切你座標周圍的範圍、簡化到約一個雷達像素的細節,然後覆寫 `map_data.h`。`--radius` 請設為你會用到的最大雷達半徑。常用選項:`--states` 加省/州界(部分國家會很密)、`--geojson file.geojson` 改用自備邊界檔不下載、`--tol` / `--max-points` 調細節。
 
+腳本同時會產生 **ATC 圖層資料**(`AIRPORTS[]`、`RUNWAYS[]`、`FIXES[]`、`AIRSPACES[]`)到同一個 `map_data.h`。一次產生全部資訊的完整範例:
+
+```bash
+# 台北 200 km:輪廓 + 機場/跑道 + 導航台 + 5 碼航點 + CTR/TMA 空域
+python tools/make_map.py --lat 25.03 --lon 121.56 --radius 200 \
+    --countries TW --min-airport small --rwy-ext 15 \
+    --fixes-csv my_fixes.csv --openaip-key YOURKEY
+```
+
+| 選項 | 作用 |
+|------|------|
+| `--countries TW` | 機場/導航台只保留這些 ISO 國碼(不給 = 範圍內全部) |
+| `--min-airport small` | 連小型機場也納入(預設 `medium`;有定期航班的一律保留) |
+| `--rwy-ext 15` | 跑道中線延伸公里數(預設 10) |
+| `--fixes-csv my_fixes.csv` | 匯入 AIP 的 5 碼航點,每行 `NAME,lat,lon` |
+| `--openaip-key YOURKEY` | 從 [openAIP](https://www.openaip.net/) 抓 CTR/TMA/CTA 空域(免費註冊;資料授權 CC BY-NC);也可改用 `--airspace-geojson file.geojson`(feature 需有 `name`+`type` 屬性),`--airspace-types` 選類別 |
+| `--no-outline` | 保留檔內既有的 `MAP_OUTLINE`(例如內附的 g0v 台灣輪廓),只更新圖層陣列 |
+| `--no-airports` / `--no-fixes` | 完全跳過該圖層 |
+
+機場、跑道、導航台資料來自 [OurAirports](https://ourairports.com/) 開放資料(public domain,免金鑰)。沒給空域來源時 `AIRSPACES[]` 就是空的。注意 openAIP 是社群維護、各地覆蓋差很多——歐洲很完整,但**台灣完全沒有空域資料**。台灣空域 repo 已內附 `tools/taiwan_airspace.geojson`(FIR + 6 個 TMA + 21 個機場管制空域),由 `tools/eaip_enr21_to_geojson.py` 從民航局 eAIP ENR 2.1 轉出——這個轉換器支援座標點列、圓、圓弧三種幾何,任何 IDS AIRNAV 系統的 eAIP 都適用,其他 openAIP 沒覆蓋的國家可走同樣路線。內附的 `map_data.h` 由這個指令產生:
+
+```bash
+python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no-outline \
+    --airspace-geojson tools/taiwan_airspace.geojson
+```
+
 ### 資料來源與致謝
 
 - 航班狀態 — [OpenSky Network](https://opensky-network.org/)
@@ -269,6 +352,9 @@ python tools/make_map.py --lat 51.5074 --lon -0.1278 --radius 300 --states
 - 在地天氣 — [Open-Meteo](https://open-meteo.com/)
 - 台灣界線 — [g0v/twgeojson](https://github.com/g0v/twgeojson)
 - 世界地圖資料 — [Natural Earth](https://www.naturalearthdata.com/)(public domain)
+- 機場 / 跑道 / 導航台 — [OurAirports](https://ourairports.com/)(public domain)
+- 台灣管制空域邊界 — [民航局 eAIP](https://ais.caa.gov.tw/) ENR 2.1
+- 其他地區空域邊界(選用)— [openAIP](https://www.openaip.net/)(CC BY-NC)
 - 概念啟發 — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 請遵守各資料來源的免費方案條款;本專案是自用興趣作品,並非商業服務。

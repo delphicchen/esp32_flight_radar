@@ -30,7 +30,7 @@ esphome:
           for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), id(echo_on));
+                             id(map_on), id(echo_on), id(atc_on));
       - delay: 3s
       - lambda: |-
           lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
@@ -43,6 +43,15 @@ esphome:
             lv_obj_add_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(echo_btn_l), lv_color_hex(0x04180C), 0);
           }
+          if (id(atc_on)) {
+            lv_obj_add_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
+          }
+      - lvgl.slider.update:
+          id: bl_slider
+          value: !lambda |-
+            // 開機同步滑桿到 NVS 還原的背光亮度
+            return id(backlight).current_values.get_brightness() * 100.0f;
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -200,7 +209,7 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false);
+                             id(map_on), false, id(atc_on));
           if (id(echo_on)) id(echo_refresh).execute();
           id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
@@ -220,7 +229,7 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false);
+                             id(map_on), false, id(atc_on));
           if (id(echo_on)) id(echo_refresh).execute();
           id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
@@ -241,7 +250,7 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false);
+                             id(map_on), false, id(atc_on));
           if (id(echo_on)) id(echo_refresh).execute();
   - platform: template
     name: Poll Interval
@@ -274,6 +283,7 @@ globals:
   - { id: ac_alt, type: 'std::vector<float>' }   # 高度(m)
   - { id: ac_cs,  type: 'std::vector<std::string>' }
   - { id: ac_vr,  type: 'std::vector<float>' }   # 垂直速率(m/s)
+  - { id: ac_lc,  type: 'std::vector<uint32_t>' } # last_contact(epoch秒),ATC 訊號延遲判斷
   - { id: slot_map, type: 'std::vector<int>' }   # 標記槽 -> 航班索引
   - { id: sel_cs_g, type: std::string }          # 選取中的呼號
   - { id: fetch_ms,    type: uint32_t, initial_value: '0' }
@@ -290,6 +300,15 @@ globals:
     restore_value: true
     initial_value: 'false'
   - { id: info_on, type: bool, initial_value: 'false' }   # i 鈕:右下面板顯示系統資訊
+  - id: atc_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
+  - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
+  - { id: trail_lon, type: 'std::vector<float>' }
+  - { id: trail_cs,  type: 'std::vector<std::string>' }   # 各軌跡槽目前記錄的呼號(換機時作廢舊歷史)
+  - { id: conflict_slot, type: 'std::vector<uint8_t>' }   # 各槽是否觸發 STCA 衝突告警
   - { id: al0, type: uint32_t, restore_value: true, initial_value: '0' }
   - { id: al1, type: uint32_t, restore_value: true, initial_value: '0' }
   - { id: al2, type: uint32_t, restore_value: true, initial_value: '0' }
@@ -408,7 +427,7 @@ script:
       - lambda: |-
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), id(echo_on));
+                             id(map_on), id(echo_on), id(atc_on));
 
   - id: start_alarm            # 開始響鈴:亮背光、顯示面板、發聲
     mode: single
@@ -658,13 +677,39 @@ interval:
           if (!radar_bg::g_states_ready) return;
           xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
           int n = radar_bg::g_result.size();
+          // ATC 軌跡尾跡:資料被覆寫前,依呼號比對舊位置,推入 trail 歷史(0=最新,2=最舊)
+          if (id(trail_lat).size() != 30) id(trail_lat).assign(30, NAN);
+          if (id(trail_lon).size() != 30) id(trail_lon).assign(30, NAN);
+          if (id(trail_cs).size() != 10) id(trail_cs).assign(10, "");
+          {
+            int lim = n < 10 ? n : 10;
+            for (int j = 0; j < lim; j++) {
+              const std::string &cs = radar_bg::g_result[j].cs;
+              int base = j * 3;
+              if (id(trail_cs)[j] != cs) {   // 這格換機了:舊歷史屬於前任,全部作廢
+                id(trail_cs)[j] = cs;
+                for (int k = 0; k < 3; k++) { id(trail_lat)[base + k] = NAN; id(trail_lon)[base + k] = NAN; }
+              }
+              int oi = -1;
+              for (int k = 0; k < (int) id(ac_cs).size(); k++)
+                if (id(ac_cs)[k] == cs) { oi = k; break; }
+              if (oi < 0) continue;   // 新出現的機,還沒有歷史
+              id(trail_lat)[base + 2] = id(trail_lat)[base + 1];
+              id(trail_lon)[base + 2] = id(trail_lon)[base + 1];
+              id(trail_lat)[base + 1] = id(trail_lat)[base];
+              id(trail_lon)[base + 1] = id(trail_lon)[base];
+              id(trail_lat)[base] = id(ac_lat)[oi];
+              id(trail_lon)[base] = id(ac_lon)[oi];
+            }
+          }
           id(ac_lat).clear(); id(ac_lon).clear(); id(ac_trk).clear();
           id(ac_vel).clear(); id(ac_alt).clear(); id(ac_cs).clear(); id(ac_vr).clear();
+          id(ac_lc).clear();
           for (auto &ac : radar_bg::g_result) {
             id(ac_lat).push_back(ac.lat); id(ac_lon).push_back(ac.lon);
             id(ac_trk).push_back(ac.trk); id(ac_vel).push_back(ac.vel);
             id(ac_alt).push_back(ac.alt); id(ac_cs).push_back(ac.cs);
-            id(ac_vr).push_back(ac.vr);
+            id(ac_vr).push_back(ac.vr); id(ac_lc).push_back(ac.lc);
           }
           radar_bg::g_states_ready = false;
           xSemaphoreGive(radar_bg::mtx());
@@ -725,6 +770,22 @@ interval:
                                  (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9) };
           lv_obj_t *dbs[10] = { id(ad0), id(ad1), id(ad2), id(ad3), id(ad4),
                                 id(ad5), id(ad6), id(ad7), id(ad8), id(ad9) };
+          lv_obj_t *sqs[10] = { id(sq0), id(sq1), id(sq2), id(sq3), id(sq4),
+                                id(sq5), id(sq6), id(sq7), id(sq8), id(sq9) };
+          lv_obj_t *vecs[10] = { id(vec0)->obj, id(vec1)->obj, id(vec2)->obj, id(vec3)->obj, id(vec4)->obj, id(vec5)->obj, id(vec6)->obj, id(vec7)->obj, id(vec8)->obj, id(vec9)->obj };
+          lv_obj_t *trs[10][3] = {
+            { id(tr0_0), id(tr0_1), id(tr0_2) },
+            { id(tr1_0), id(tr1_1), id(tr1_2) },
+            { id(tr2_0), id(tr2_1), id(tr2_2) },
+            { id(tr3_0), id(tr3_1), id(tr3_2) },
+            { id(tr4_0), id(tr4_1), id(tr4_2) },
+            { id(tr5_0), id(tr5_1), id(tr5_2) },
+            { id(tr6_0), id(tr6_1), id(tr6_2) },
+            { id(tr7_0), id(tr7_1), id(tr7_2) },
+            { id(tr8_0), id(tr8_1), id(tr8_2) },
+            { id(tr9_0), id(tr9_1), id(tr9_2) },
+          };
+          bool atc = id(atc_on);
           if (id(slot_map).size() != 10) id(slot_map).assign(10, -1);
           float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
           float rng = id(radar_range).state;
@@ -732,6 +793,8 @@ interval:
           float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
           if (dt > 180.0f) dt = 180.0f;   // 資料太舊就不再外插
           int n = id(ac_lat).size(), shown = 0;
+          float earr[10], noarr[10];
+          bool selarr[10];
           for (int i = 0; i < n && shown < 10; i++) {
             float rad = id(ac_trk)[i] * 3.14159265f / 180.0f;
             float vkm = id(ac_vel)[i] * dt / 1000.0f;
@@ -745,9 +808,62 @@ interval:
             bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
             lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
             lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
-            char db[40];
-            snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
-                     id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
+            earr[shown] = e; noarr[shown] = no; selarr[shown] = selg;
+            // 訊號延遲:last_contact 超過 60 秒沒更新
+            bool stale = false;
+            if (id(rtc_time).now().is_valid()) {
+              uint32_t now_epoch = (uint32_t) id(rtc_time).now().timestamp;
+              uint32_t lc = (i < (int) id(ac_lc).size()) ? id(ac_lc)[i] : now_epoch;
+              stale = (now_epoch > lc) && (now_epoch - lc > 60);
+            }
+            if (atc) {
+              lv_obj_add_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
+              uint32_t basecol = selg ? 0xFFFFFF : (stale ? 0xFFCC00 : 0x00FF41);
+              lv_obj_set_style_bg_color(sqs[shown], lv_color_hex(basecol), 0);
+              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(basecol), 0);
+              // 速度向量線:未來 120 秒推算位置,超出雷達圈就沿方向 clamp 回圓周上
+              float vkm2 = id(ac_vel)[i] * 120.0f / 1000.0f;
+              float e2 = e + vkm2 * sinf(rad);
+              float n2 = no + vkm2 * cosf(rad);
+              float d2 = sqrtf(e2 * e2 + n2 * n2);
+              if (d2 > rng) { e2 *= rng / d2; n2 *= rng / d2; }
+              int px2 = 240 + (int) (e2 / rng * 226.0f);
+              int py2 = 240 - (int) (n2 / rng * 226.0f);
+              static lv_point_t vp[10][2];
+              vp[shown][0].x = px;  vp[shown][0].y = py;
+              vp[shown][1].x = px2; vp[shown][1].y = py2;
+              lv_line_set_points(vecs[shown], vp[shown], 2);
+              lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              // 歷史軌跡尾跡(3 個逐漸變淡的小點;trail 依資料索引 i 儲存,i>=10 沒有記錄)
+              for (int k = 0; k < 3; k++) {
+                float tlat = (i < 10) ? id(trail_lat)[i * 3 + k] : NAN;
+                float tlon = (i < 10) ? id(trail_lon)[i * 3 + k] : NAN;
+                if (isnan(tlat) || isnan(tlon)) { lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN); continue; }
+                float te = (tlon - lon0) * 111.320f * coslat;
+                float tn = (tlat - lat0) * 110.574f;
+                if (te * te + tn * tn > rng * rng) { lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN); continue; }
+                int tx = 240 + (int) (te / rng * 226.0f);
+                int ty = 240 - (int) (tn / rng * 226.0f);
+                lv_obj_set_pos(trs[shown][k], tx - 1, ty - 1);
+                lv_obj_clear_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              }
+            } else {
+              lv_obj_clear_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              for (int k = 0; k < 3; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);   // 還原預設標籤色
+            }
+            char db[48];
+            if (atc) {
+              const char *arrow = (id(ac_vr)[i] > 0.5f) ? "^" : (id(ac_vr)[i] < -0.5f ? "v" : "=");
+              snprintf(db, sizeof(db), "%s%s\nFL%03.0f%s%.0fkt", id(ac_cs)[i].c_str(),
+                       stale ? "*" : "", id(ac_alt)[i] * 0.032808f, arrow, id(ac_vel)[i] * 1.9438f);
+            } else {
+              snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
+                       id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
+            }
             if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
               lv_label_set_text(dbs[shown], db);
             if (id(slot_angle).size() != 10) id(slot_angle).assign(10, -1.0f);
@@ -759,8 +875,35 @@ interval:
             lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
             shown++;
           }
+          // STCA:兩兩比對水平距離 < 5.5km 且高度差 < 300m → 衝突告警(紅色,選取中則紅白交替)
+          if (id(conflict_slot).size() != 10) id(conflict_slot).assign(10, 0);
+          for (int a = 0; a < 10; a++) id(conflict_slot)[a] = 0;
+          if (atc) {
+            for (int a = 0; a < shown; a++) {
+              int ia = id(slot_map)[a];
+              for (int b = a + 1; b < shown; b++) {
+                int ib = id(slot_map)[b];
+                float dex = earr[a] - earr[b], dno = noarr[a] - noarr[b];
+                float dist = sqrtf(dex * dex + dno * dno);
+                float dalt = fabsf(id(ac_alt)[ia] - id(ac_alt)[ib]);
+                if (dist < 5.5f && dalt < 300.0f) {
+                  id(conflict_slot)[a] = 1;
+                  id(conflict_slot)[b] = 1;
+                }
+              }
+            }
+            for (int a = 0; a < shown; a++) {
+              if (!id(conflict_slot)[a]) continue;
+              bool blink = (millis() / 1000) % 2 == 0;
+              uint32_t col = (selarr[a] && !blink) ? 0xFFFFFF : 0xFF0033;
+              lv_obj_set_style_bg_color(sqs[a], lv_color_hex(col), 0);
+              lv_obj_set_style_text_color(dbs[a], lv_color_hex(col), 0);
+            }
+          }
           for (int i = shown; i < 10; i++) {
             lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
+            for (int k = 0; k < 3; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
             id(slot_map)[i] = -1;
             if (id(slot_angle).size() == 10) id(slot_angle)[i] = -1.0f;
           }
@@ -999,6 +1142,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq0
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad0
                   x: 32
@@ -1028,6 +1183,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq1
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad1
                   x: 32
@@ -1057,6 +1224,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq2
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad2
                   x: 32
@@ -1086,6 +1265,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq3
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad3
                   x: 32
@@ -1115,6 +1306,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq4
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad4
                   x: 32
@@ -1144,6 +1347,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq5
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad5
                   x: 32
@@ -1173,6 +1388,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq6
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad6
                   x: 32
@@ -1202,6 +1429,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq7
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad7
                   x: 32
@@ -1231,6 +1470,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq8
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad8
                   x: 32
@@ -1260,6 +1511,18 @@ lvgl:
                   x: 0
                   y: 6
                   src: plane_img
+              - obj:
+                  id: sq9
+                  x: 12
+                  y: 18
+                  width: 4
+                  height: 4
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
               - label:
                   id: ad9
                   x: 32
@@ -1271,6 +1534,427 @@ lvgl:
               - script.execute:
                   id: select_slot
                   slot: 9
+        # ===== ATC 模式:速度向量線 + 歷史軌跡尾跡(平常隱藏,atc_on 時才顯示)=====
+        - line:
+            id: vec0
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec1
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec2
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec3
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec4
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec5
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec6
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec7
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec8
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec9
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - obj:
+            id: tr0_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_0
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 80%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_1
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 50%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_2
+            x: -20
+            y: -20
+            width: 2
+            height: 2
+            bg_color: 0x00FF41
+            bg_opa: 25%
+            border_width: 0
+            radius: 0
+            pad_all: 0
+            hidden: true
         # 中心點(你的位置)
         - obj:
             x: 236
@@ -1298,7 +1982,7 @@ lvgl:
             id: map_btn
             x: 495
             y: 154
-            width: 65 #80
+            width: 56
             height: 32
             radius: 4
             checkable: true
@@ -1324,9 +2008,9 @@ lvgl:
                   id(rebuild_base).execute();
         - button:
             id: echo_btn
-            x: 570 #600
+            x: 554
             y: 154
-            width: 65 #80
+            width: 56
             height: 32
             radius: 4
             checkable: true
@@ -1353,9 +2037,9 @@ lvgl:
                   if (on) id(echo_refresh).execute();   // 並排一次新抓取
         - button:
             id: pwr_btn
-            x: 645 #700
+            x: 672
             y: 154
-            width: 65 #80
+            width: 56
             height: 32
             radius: 4
             checkable: true
@@ -1496,12 +2180,41 @@ lvgl:
                       id(opensky_client_secret).state.c_str());
                   lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));
               - lvgl.page.show: config_page
+        # ATC 鈕:切換雷達顯示為 ATC 模式(方塊目標點/速度向量線/歷史軌跡/STCA 衝突告警)
+        - button:
+            id: atc_btn
+            x: 613
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: atc_btn_l
+                  align: CENTER
+                  text: "ATC"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
+                  id(atc_on) = on;
+                  lv_obj_set_style_text_color(id(atc_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+              - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
         # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
         - button:
             id: info_btn
-            x: 720
+            x: 731
             y: 154
-            width: 65 #32
+            width: 56
             height: 32
             radius: 4
             checkable: true
@@ -1538,6 +2251,37 @@ lvgl:
                     lv_label_set_text(id(sel_l4), "");
                     id(fetch_route).execute();
                   }
+        # 亮度滑桿(資訊面板下方):拖動即時調背光,存於 light 的 NVS 狀態
+        - label:
+            x: 500
+            y: 406
+            text: "BRT"
+            text_font: font_small
+            text_color: 0x6E8273
+        - slider:
+            id: bl_slider
+            x: 552
+            y: 410
+            width: 228
+            height: 10
+            min_value: 5
+            max_value: 100
+            value: 100
+            bg_color: 0x0A2416
+            bg_opa: COVER
+            radius: 5
+            indicator:
+              bg_color: 0x00A050
+            knob:
+              bg_color: 0x00E66E
+              radius: 8
+              pad_all: 4
+            on_value:
+              - lambda: |-
+                  auto call = id(backlight).turn_on();
+                  call.set_brightness(x / 100.0f);
+                  call.set_transition_length(0);
+                  call.perform();
 
         # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
         - obj:

@@ -29,6 +29,7 @@ namespace radar_bg {
 
 struct AcInfo {
   float lat, lon, trk, vel, alt, vr, dist;
+  uint32_t lc;   // last_contact (epoch 秒),ATC 模式判斷訊號延遲用
   std::string cs;
 };
 
@@ -162,6 +163,7 @@ inline void do_states(const Job &j) {
       ac.vel = a[9] | 0.0f;
       ac.trk = a[10] | 0.0f;
       ac.vr  = a[11] | 0.0f;
+      ac.lc  = a[4] | 0u;
       const char *c = a[1] | "";
       ac.cs = c;
       while (!ac.cs.empty() && ac.cs.back() == ' ') ac.cs.pop_back();
@@ -437,7 +439,7 @@ inline void request_route(const std::string &cs) {
 // map/echo 之上,烤進底圖後每幀連這幾個 widget 的圓弧邊框繪製也省掉。
 // alpha 混色只在資料更新時做這一次,之後每幀渲染對這層只剩不透明 blit(省 PSRAM 頻寬)。
 inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
-                               bool map_show, bool echo_show) {
+                               bool map_show, bool echo_show, bool atc_show) {
   lv_img_dsc_t *img = lv_canvas_get_img(cv);
   if (!img || !img->data) return;
   const size_t BYTES = (size_t) 456 * 456 * sizeof(lv_color_t);
@@ -511,6 +513,103 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   static const lv_coord_t RINGS[4] = {228, 171, 114, 57};
   for (int k = 0; k < 4; k++)
     lv_canvas_draw_arc(cv, 228, 228, RINGS[k], 0, 360, &ad);
+  // ---- ATC 靜態圖層(僅 ATC 模式):空域邊界/跑道+延伸線/機場/導航點 ----
+  // 跟距離環一樣每次重建時畫、不進快取;重建只在切換或座標變更時發生,成本無感
+  if (atc_show) {
+    float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+    float r2 = rng * rng;
+    auto prj = [&](float la, float lo, float &e, float &n, lv_point_t &p) {
+      e = (lo - lon0) * 111.320f * coslat;
+      n = (la - lat0) * 110.574f;
+      p.x = (lv_coord_t) (228 + e / rng * 226.0f);
+      p.y = (lv_coord_t) (228 - n / rng * 226.0f);
+    };
+    // 空域邊界(最底):TMA/CTA 暗藍、CTR 類亮一階
+    lv_draw_line_dsc_t asd;
+    lv_draw_line_dsc_init(&asd);
+    asd.width = 1;
+    for (int a = 0; a < AIRSPACES_LEN; a++) {
+      const MapAirspace &as = AIRSPACES[a];
+      asd.color = lv_color_hex(as.cls == 0 ? 0x3A7A9A : 0x2A5070);
+      bool hp = false;
+      lv_point_t prev{0, 0};
+      float pd2 = 1e18f;
+      for (int k = 0; k < as.npts; k++) {
+        float e, n;
+        lv_point_t p;
+        prj(AIRSPACE_PTS[as.off + 2 * k], AIRSPACE_PTS[as.off + 2 * k + 1], e, n, p);
+        float d2 = e * e + n * n;
+        if (hp && (d2 <= r2 || pd2 <= r2)) {
+          lv_point_t s[2] = {prev, p};
+          lv_canvas_draw_line(cv, s, 2, &asd);
+        }
+        prev = p; pd2 = d2; hp = true;
+      }
+    }
+    // 跑道延伸中線(虛線)+ 跑道本體(亮實線)
+    lv_draw_line_dsc_t exd;
+    lv_draw_line_dsc_init(&exd);
+    exd.color = lv_color_hex(0x4A7A8A);
+    exd.width = 1;
+    exd.dash_width = 4;
+    exd.dash_gap = 4;
+    lv_draw_line_dsc_t rwd;
+    lv_draw_line_dsc_init(&rwd);
+    rwd.color = lv_color_hex(0xD0E4EE);
+    rwd.width = 2;
+    for (int i = 0; i < RUNWAYS_LEN; i++) {
+      const MapRunway &r = RUNWAYS[i];
+      float e1, n1, e2, n2;
+      lv_point_t p1, p2, x1, x2;
+      prj(r.xlat1, r.xlon1, e1, n1, x1);
+      prj(r.xlat2, r.xlon2, e2, n2, x2);
+      if (e1 * e1 + n1 * n1 > r2 && e2 * e2 + n2 * n2 > r2) continue;
+      lv_point_t sx[2] = {x1, x2};
+      lv_canvas_draw_line(cv, sx, 2, &exd);
+      prj(r.lat1, r.lon1, e1, n1, p1);
+      prj(r.lat2, r.lon2, e2, n2, p2);
+      lv_point_t sr[2] = {p1, p2};
+      lv_canvas_draw_line(cv, sr, 2, &rwd);
+    }
+    // 導航點:小空心三角 + 名稱(暗色,避免壓過航機)
+    lv_draw_line_dsc_t fxd;
+    lv_draw_line_dsc_init(&fxd);
+    fxd.color = lv_color_hex(0x4A7A5A);
+    fxd.width = 1;
+    lv_draw_label_dsc_t fld;
+    lv_draw_label_dsc_init(&fld);
+    fld.font = lv_font_default();
+    fld.color = lv_color_hex(0x50805E);
+    for (int i = 0; i < FIXES_LEN; i++) {
+      float e, n;
+      lv_point_t p;
+      prj(FIXES[i].lat, FIXES[i].lon, e, n, p);
+      if (e * e + n * n > r2) continue;
+      lv_point_t tri[4] = {{(lv_coord_t)(p.x), (lv_coord_t)(p.y - 3)},
+                           {(lv_coord_t)(p.x + 3), (lv_coord_t)(p.y + 3)},
+                           {(lv_coord_t)(p.x - 3), (lv_coord_t)(p.y + 3)},
+                           {(lv_coord_t)(p.x), (lv_coord_t)(p.y - 3)}};
+      lv_canvas_draw_line(cv, tri, 4, &fxd);
+      lv_canvas_draw_text(cv, p.x + 5, p.y - 6, 60, &fld, FIXES[i].name);
+    }
+    // 機場:實心小方塊 + ICAO 代碼(最上層)
+    lv_draw_rect_dsc_t apd;
+    lv_draw_rect_dsc_init(&apd);
+    apd.bg_color = lv_color_hex(0xE0ECF4);
+    apd.bg_opa = LV_OPA_COVER;
+    lv_draw_label_dsc_t ald;
+    lv_draw_label_dsc_init(&ald);
+    ald.font = lv_font_default();
+    ald.color = lv_color_hex(0x9AC8E0);
+    for (int i = 0; i < AIRPORTS_LEN; i++) {
+      float e, n;
+      lv_point_t p;
+      prj(AIRPORTS[i].lat, AIRPORTS[i].lon, e, n, p);
+      if (e * e + n * n > r2) continue;
+      lv_canvas_draw_rect(cv, p.x - 2, p.y - 2, 5, 5, &apd);
+      lv_canvas_draw_text(cv, p.x + 5, p.y - 14, 60, &ald, AIRPORTS[i].icao);
+    }
+  }
   lv_obj_invalidate(cv);
 }
 
