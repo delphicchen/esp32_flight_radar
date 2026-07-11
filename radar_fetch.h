@@ -12,6 +12,8 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "esp_http_client.h"
+#include "esp_http_server.h"
+#include "esp_lcd_panel_rgb.h"
 #include "esp_heap_caps.h"
 #include "esp_flash.h"
 #include "esp_ota_ops.h"
@@ -23,6 +25,7 @@ extern "C" {
 #include "esp_log.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/image/image.h"
+#include "esphome/components/rpi_dpi_rgb/rpi_dpi_rgb.h"
 #include "map_data.h"
 
 namespace radar_bg {
@@ -438,8 +441,13 @@ inline void request_route(const std::string &cs) {
 // 平時重建 = memcpy 快取 + 回波混色 + 畫環,~15ms。距離環/十字線內容不變但位於
 // map/echo 之上,烤進底圖後每幀連這幾個 widget 的圓弧邊框繪製也省掉。
 // alpha 混色只在資料更新時做這一次,之後每幀渲染對這層只剩不透明 blit(省 PSRAM 頻寬)。
+// ATC 圖層 bitmask:bit0 空域 / bit1 跑道 / bit2 機場 / bit3 導航點;ATC 模式關閉 = 0
+inline uint8_t atc_layer_mask(bool atc, bool asp, bool rwy, bool apt, bool fix) {
+  return atc ? (uint8_t) ((asp ? 1 : 0) | (rwy ? 2 : 0) | (apt ? 4 : 0) | (fix ? 8 : 0)) : 0;
+}
+
 inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
-                               bool map_show, bool echo_show, bool atc_show) {
+                               bool map_show, bool echo_show, uint8_t atc_layers) {
   lv_img_dsc_t *img = lv_canvas_get_img(cv);
   if (!img || !img->data) return;
   const size_t BYTES = (size_t) 456 * 456 * sizeof(lv_color_t);
@@ -513,9 +521,9 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   static const lv_coord_t RINGS[4] = {228, 171, 114, 57};
   for (int k = 0; k < 4; k++)
     lv_canvas_draw_arc(cv, 228, 228, RINGS[k], 0, 360, &ad);
-  // ---- ATC 靜態圖層(僅 ATC 模式):空域邊界/跑道+延伸線/機場/導航點 ----
+  // ---- ATC 靜態圖層(僅 ATC 模式,依 bitmask 逐層開關):空域/跑道+延伸線/機場/導航點 ----
   // 跟距離環一樣每次重建時畫、不進快取;重建只在切換或座標變更時發生,成本無感
-  if (atc_show) {
+  if (atc_layers) {
     float coslat = cosf(lat0 * 3.14159265f / 180.0f);
     float r2 = rng * rng;
     auto prj = [&](float la, float lo, float &e, float &n, lv_point_t &p) {
@@ -525,6 +533,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       p.y = (lv_coord_t) (228 - n / rng * 226.0f);
     };
     // 空域邊界(最底):TMA/CTA 暗藍、CTR 類亮一階
+    if (atc_layers & 1) {
     lv_draw_line_dsc_t asd;
     lv_draw_line_dsc_init(&asd);
     asd.width = 1;
@@ -546,13 +555,13 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         prev = p; pd2 = d2; hp = true;
       }
     }
+    }
     // 跑道延伸中線(虛線)+ 跑道本體(亮實線)
+    if (atc_layers & 2) {
     lv_draw_line_dsc_t exd;
     lv_draw_line_dsc_init(&exd);
     exd.color = lv_color_hex(0x4A7A8A);
     exd.width = 1;
-    exd.dash_width = 4;
-    exd.dash_gap = 4;
     lv_draw_line_dsc_t rwd;
     lv_draw_line_dsc_init(&rwd);
     rwd.color = lv_color_hex(0xD0E4EE);
@@ -564,14 +573,27 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       prj(r.xlat1, r.xlon1, e1, n1, x1);
       prj(r.xlat2, r.xlon2, e2, n2, x2);
       if (e1 * e1 + n1 * n1 > r2 && e2 * e2 + n2 * n2 > r2) continue;
-      lv_point_t sx[2] = {x1, x2};
-      lv_canvas_draw_line(cv, sx, 2, &exd);
+      // LVGL sw 渲染器的 dash 不支援斜線,延伸中線手動切段畫虛線(5px 畫 4px 空)
+      float ddx = (float) (x2.x - x1.x), ddy = (float) (x2.y - x1.y);
+      float dl = sqrtf(ddx * ddx + ddy * ddy);
+      if (dl >= 2.0f) {
+        for (float s = 0; s < dl; s += 9.0f) {
+          float t0 = s / dl, t1 = (s + 5.0f) / dl;
+          if (t1 > 1.0f) t1 = 1.0f;
+          lv_point_t sx[2] = {
+              {(lv_coord_t) (x1.x + ddx * t0), (lv_coord_t) (x1.y + ddy * t0)},
+              {(lv_coord_t) (x1.x + ddx * t1), (lv_coord_t) (x1.y + ddy * t1)}};
+          lv_canvas_draw_line(cv, sx, 2, &exd);
+        }
+      }
       prj(r.lat1, r.lon1, e1, n1, p1);
       prj(r.lat2, r.lon2, e2, n2, p2);
       lv_point_t sr[2] = {p1, p2};
       lv_canvas_draw_line(cv, sr, 2, &rwd);
     }
+    }
     // 導航點:小空心三角 + 名稱(暗色,避免壓過航機)
+    if (atc_layers & 8) {
     lv_draw_line_dsc_t fxd;
     lv_draw_line_dsc_init(&fxd);
     fxd.color = lv_color_hex(0x4A7A5A);
@@ -592,7 +614,9 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       lv_canvas_draw_line(cv, tri, 4, &fxd);
       lv_canvas_draw_text(cv, p.x + 5, p.y - 6, 60, &fld, FIXES[i].name);
     }
+    }
     // 機場:實心小方塊 + ICAO 代碼(最上層)
+    if (atc_layers & 4) {
     lv_draw_rect_dsc_t apd;
     lv_draw_rect_dsc_init(&apd);
     apd.bg_color = lv_color_hex(0xE0ECF4);
@@ -609,8 +633,82 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       lv_canvas_draw_rect(cv, p.x - 2, p.y - 2, 5, 5, &apd);
       lv_canvas_draw_text(cv, p.x + 5, p.y - 14, 60, &ald, AIRPORTS[i].icao);
     }
+    }
   }
   lv_obj_invalidate(cv);
+}
+
+// ---- 三指下滑截圖:抓 RGB 面板 framebuffer → BMP,經 HTTP(:8081)供 HA downloader 下載 ----
+#define SHOT_SWAP_BYTES 1   // 若截圖紅藍對調/顏色錯亂,改 1 重編譯
+inline uint8_t *g_shot_buf = nullptr;        // 800*480*2 快照(PSRAM,首次截圖才配置)
+inline volatile bool g_shot_valid = false;
+
+// esp_lcd panel handle 在 ESPHome 元件裡是 protected,用衍生類取用(單 FB,拿到即當前畫面)
+struct RpiSpy : public esphome::rpi_dpi_rgb::RpiDpiRgb {
+  static esp_lcd_panel_handle_t handle(esphome::rpi_dpi_rgb::RpiDpiRgb *d) {
+    return static_cast<RpiSpy *>(d)->handle_;
+  }
+};
+
+inline esp_err_t shot_http_get(httpd_req_t *req) {
+  if (!g_shot_valid || !g_shot_buf) { httpd_resp_send_404(req); return ESP_OK; }
+  const int W = 800, H = 480;
+  // 24-bit BMP 標頭(row 3*800 是 4 的倍數,免 padding)
+  uint8_t hdr[54] = {0};
+  uint32_t img = (uint32_t) W * H * 3, sz = 54 + img, off = 54, ihsz = 40;
+  int32_t w = W, h = H;
+  uint16_t planes = 1, bpp = 24;
+  hdr[0] = 'B'; hdr[1] = 'M';
+  memcpy(hdr + 2, &sz, 4);  memcpy(hdr + 10, &off, 4);  memcpy(hdr + 14, &ihsz, 4);
+  memcpy(hdr + 18, &w, 4);  memcpy(hdr + 22, &h, 4);
+  memcpy(hdr + 26, &planes, 2);  memcpy(hdr + 28, &bpp, 2);  memcpy(hdr + 34, &img, 4);
+  httpd_resp_set_type(req, "image/bmp");
+  httpd_resp_send_chunk(req, (const char *) hdr, 54);
+  static uint8_t row[800 * 3];
+  for (int y = H - 1; y >= 0; y--) {         // BMP 由下往上
+    const uint16_t *src = (const uint16_t *) g_shot_buf + (size_t) y * W;
+    for (int x = 0; x < W; x++) {
+      uint16_t v = src[x];
+#if SHOT_SWAP_BYTES
+      v = (uint16_t) ((v >> 8) | (v << 8));
+#endif
+      row[x * 3 + 0] = (uint8_t) ((v & 0x1F) << 3);          // B
+      row[x * 3 + 1] = (uint8_t) (((v >> 5) & 0x3F) << 2);   // G
+      row[x * 3 + 2] = (uint8_t) (((v >> 11) & 0x1F) << 3);  // R
+    }
+    if (httpd_resp_send_chunk(req, (const char *) row, sizeof(row)) != ESP_OK)
+      return ESP_FAIL;
+  }
+  httpd_resp_send_chunk(req, nullptr, 0);
+  return ESP_OK;
+}
+
+inline bool screenshot_capture(esphome::rpi_dpi_rgb::RpiDpiRgb *disp) {
+  const size_t BYTES = (size_t) 800 * 480 * 2;
+  if (!g_shot_buf) g_shot_buf = (uint8_t *) heap_caps_malloc(BYTES, MALLOC_CAP_SPIRAM);
+  if (!g_shot_buf) return false;
+  void *fb = nullptr;
+  if (esp_lcd_rgb_panel_get_frame_buffer(RpiSpy::handle(disp), 1, &fb) != ESP_OK || !fb)
+    return false;
+  g_shot_valid = false;                      // 服務端讀到一半時避免撕裂判定
+  memcpy(g_shot_buf, fb, BYTES);
+  g_shot_valid = true;
+  static httpd_handle_t srv = nullptr;       // 首次截圖才啟動 HTTP 服務
+  if (!srv) {
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.server_port = 8081;
+    cfg.ctrl_port = 32780;                   // 避開 ESPHome web_server 的 httpd ctrl port
+    cfg.max_open_sockets = 2;                // 預設 7 太浪費,一次只服務一個下載
+    cfg.lru_purge_enable = true;             // 閒置連線自動回收,不佔 socket
+    if (httpd_start(&srv, &cfg) == ESP_OK) {
+      static const httpd_uri_t uri = {"/screenshot.bmp", HTTP_GET, shot_http_get, nullptr};
+      httpd_register_uri_handler(srv, &uri);
+    } else {
+      srv = nullptr;
+      return false;
+    }
+  }
+  return true;
 }
 
 // ---- 系統資訊(i 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 填入右下角六個 label ----

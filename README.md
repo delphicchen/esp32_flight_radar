@@ -27,7 +27,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 - **Live flight radar** — pulls aircraft states from the [OpenSky Network](https://opensky-network.org/) around your coordinates and plots them on a 480×480 radar scope with a rotating sweep, fading trail, and target glow as the beam passes each aircraft.
 - **ATC-style labels** — each aircraft shows its callsign, flight level and speed, with a heading-oriented plane icon. Tap any aircraft to see its **origin → destination** (via [adsbdb.com](https://www.adsbdb.com/)), altitude, speed, heading, vertical rate, distance and bearing.
-- **ATC mode** — toggle button switches the plane icons to bare **target squares** with a **2‑minute velocity vector**, a **3‑point fading history trail**, and a local **STCA-style conflict alert** (two aircraft within 5.5 km / 300 m get flagged red); stale data (no update for 60 s) is flagged yellow with a `*` suffix. Turn it off to instantly restore the normal plane-icon view.
+- **ATC mode** — toggle button switches the plane icons to bare **target squares** with a **2‑minute velocity vector**, a **dotted fading history trail**, and a local **STCA-style conflict alert** (two aircraft within 5.5 km / 300 m get flagged red); stale data (no update for 60 s) is flagged yellow with a `*` suffix. Turn it off to instantly restore the normal plane-icon view.
 - **Weather echo overlay** — optional rain-radar layer from [RainViewer](https://www.rainviewer.com/), downloaded, decoded and composited **entirely on a background core** so the UI never stutters. Toggle with an on-screen button.
 - **Map outline overlay** — optional coastline / administrative border layer (Taiwan by default), toggle on screen.
 - **Home Assistant integration** — the device auto-discovers in HA; backlight, Wi-Fi signal and buttons become HA entities.
@@ -111,12 +111,32 @@ Press the **ATC** button (in the top-right button row, between **ECHO** and **PW
 
 - Each aircraft becomes a small **green target square**. Tap it exactly like the plane icon to select/deselect (same `select_slot` behavior).
 - A thin line projects each aircraft's **position 2 minutes ahead** based on its current heading and ground speed.
-- A **3-point fading trail** shows its last few fetched positions.
+- A **dotted fading trail** follows behind, through its last few fetched positions (dots, so it can't be confused with the solid vector line).
 - Labels switch to two lines: callsign on top, `FL<flight level><climb arrow><speed>kt` below (`^` climbing, `v` descending, `=` level).
 - **Conflict alert (red):** any two aircraft within **5.5 km** horizontally *and* **300 m** vertically both turn red; if one of them is the selected aircraft it blinks white/red instead of solid white.
 - **Stale data (yellow):** if OpenSky hasn't updated an aircraft in over 60 s, its label turns yellow and gets a trailing `*`.
 - Selected aircraft (no conflict) stay white.
 - **Static video map:** ATC mode also bakes the `map_data.h` overlays into the base layer — airspace boundaries (CTR-class zones brighter blue, TMA/CTA dimmer), runways with **dashed extended centerlines**, airport squares with ICAO codes, and navaid/fix triangles with names. All of it disappears when ATC mode is switched off.
+- **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
+
+### Screenshots to Home Assistant
+
+Swipe **three fingers downward** anywhere on the screen to take a screenshot. The device snapshots the framebuffer, serves it at `http://flight-radar.local:8081/screenshot.bmp` (800×480 BMP) and fires the HA event `esphome.flight_radar_screenshot`. To save it automatically, add the **Downloader** integration in HA (set its directory, e.g. `/config/downloads`) and an automation:
+
+```yaml
+automation:
+  - alias: Save flight radar screenshot
+    trigger:
+      - platform: event
+        event_type: esphome.flight_radar_screenshot
+    action:
+      - service: downloader.download_file
+        data:
+          url: "http://flight-radar.local:8081/screenshot.bmp"
+          filename: "radar_{{ now().strftime('%Y%m%d_%H%M%S') }}.bmp"
+```
+
+You can also just open the URL in a browser. If the colors come out wrong (red/blue swapped), set `SHOT_SWAP_BYTES` to `1` in `radar_fetch.h` and re-flash.
 
 ### Configuration reference
 
@@ -197,7 +217,7 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 
 - **即時航班雷達** — 從 [OpenSky Network](https://opensky-network.org/) 取得你座標周圍的航班,繪製在 480×480 雷達盤上,附旋轉掃描線、漸暗餘暉,以及掃描線掃過飛機時的高亮效果。
 - **航管風格標籤** — 每架飛機顯示呼號、飛航高度層與速度,搭配依航向旋轉的飛機圖示。點選任一飛機可查看**起點 → 目的地**(透過 [adsbdb.com](https://www.adsbdb.com/))、高度、速度、航向、垂直速率、距離與方位。
-- **ATC 模式** — 按鈕切換,飛機圖示換成純**目標方塊**,附**未來 2 分鐘速度向量線**、**3 點漸淡歷史軌跡**,以及本地端 **STCA 風格衝突告警**(兩機水平距離 < 5.5km 且高度差 < 300m 觸發紅色);資料超過 60 秒未更新則標為黃色並加 `*`。再按一次立即還原成預設的飛機圖示畫面。
+- **ATC 模式** — 按鈕切換,飛機圖示換成純**目標方塊**,附**未來 2 分鐘速度向量線**、**漸淡的點線歷史軌跡**,以及本地端 **STCA 風格衝突告警**(兩機水平距離 < 5.5km 且高度差 < 300m 觸發紅色);資料超過 60 秒未更新則標為黃色並加 `*`。再按一次立即還原成預設的飛機圖示畫面。
 - **氣象回波圖層** — 可選的降雨雷達層,資料來自 [RainViewer](https://www.rainviewer.com/);下載、解碼、合成**全部在背景核心完成**,主畫面完全不卡。以螢幕按鈕開關。
 - **地圖輪廓圖層** — 可選的海岸線 / 行政區界(預設台灣),螢幕按鈕開關。
 - **Home Assistant 整合** — 裝置會自動被 HA 探索;背光、Wi-Fi 訊號與按鈕都成為 HA 實體。
@@ -281,12 +301,32 @@ esphome run radar.yaml
 
 - 每架飛機變成一個小小的**綠色目標方塊**,點擊方式跟飛機圖示一樣(照樣呼叫 `select_slot` 選取/取消選取)。
 - 一條細線依目前航向與地速,投射該機**2 分鐘後的推算位置**。
-- **3 點漸淡軌跡**顯示最近幾次抓取到的舊位置。
+- **點線漸淡軌跡**跟在機後,連向最近幾次抓取到的舊位置(點狀,不會與實線向量混淆)。
 - 標籤改成兩行:第一行呼號,第二行 `FL高度層+爬升符號+速度kt`(`^` 爬升、`v` 下降、`=` 平飛)。
 - **衝突告警(紅色)**:任兩機水平距離 < **5.5 km** 且高度差 < **300 m** 時雙雙變紅;若其中一台是目前選取的飛機,改成白/紅交替閃爍而非純白。
 - **資料延遲(黃色)**:OpenSky 超過 60 秒沒更新該機資料,標籤變黃並在呼號後加 `*`。
 - 選取中且無衝突的飛機維持白色。
 - **靜態航圖(video map)**:ATC 模式同時把 `map_data.h` 的圖層烤進底圖——管制空域邊界(CTR 類亮藍、TMA/CTA 暗藍)、跑道與**虛線延伸中線**、機場方塊+ICAO 代碼、導航點三角+名稱。關閉 ATC 模式即全部消失。
+- **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
+
+### 截圖存到 Home Assistant
+
+在螢幕任意處**三指下滑**即截圖。裝置會快照 framebuffer、在 `http://flight-radar.local:8081/screenshot.bmp` 提供 800×480 BMP,並發出 HA 事件 `esphome.flight_radar_screenshot`。要自動存檔的話,在 HA 加入 **Downloader** 整合(設定下載目錄,例如 `/config/downloads`)並建立自動化:
+
+```yaml
+automation:
+  - alias: 存雷達截圖
+    trigger:
+      - platform: event
+        event_type: esphome.flight_radar_screenshot
+    action:
+      - service: downloader.download_file
+        data:
+          url: "http://flight-radar.local:8081/screenshot.bmp"
+          filename: "radar_{{ now().strftime('%Y%m%d_%H%M%S') }}.bmp"
+```
+
+也可以直接用瀏覽器開那個網址。若截圖顏色不對(紅藍對調),把 `radar_fetch.h` 的 `SHOT_SWAP_BYTES` 改成 `1` 重新燒錄。
 
 ### 設定項一覽
 

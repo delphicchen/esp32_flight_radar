@@ -28,9 +28,14 @@ esphome:
           // 喇叭下拉選單:字型無 FontAwesome 箭頭字形(U+F078),移除符號免警告
           LvDropdownType *dds[5] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd) };
           for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
+          // 鎖定所有頁面的捲動:避免三指截圖手勢把頁面拖出位移,截到偏移後的內容
+          lv_obj_t *pgs[4] = { id(main_page)->obj, id(alarm_page)->obj,
+                               id(config_page)->obj, id(settings_page)->obj };
+          for (auto *p : pgs) lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), id(echo_on), id(atc_on));
+                             id(map_on), id(echo_on),
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
       - delay: 3s
       - lambda: |-
           lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
@@ -47,6 +52,20 @@ esphome:
             lv_obj_add_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
           }
+          // ATC 圖層開關按鈕:還原 NVS 儲存的勾選狀態
+          struct { bool on; lv_obj_t *btn, *lbl; } lay[4] = {
+            { id(atc_asp_on), (lv_obj_t *) id(asp_btn), id(asp_btn_l) },
+            { id(atc_rwy_on), (lv_obj_t *) id(rwy_btn), id(rwy_btn_l) },
+            { id(atc_apt_on), (lv_obj_t *) id(apt_btn), id(apt_btn_l) },
+            { id(atc_fix_on), (lv_obj_t *) id(fix_btn), id(fix_btn_l) },
+          };
+          for (auto &l : lay) {
+            if (l.on) {
+              lv_obj_add_state(l.btn, LV_STATE_CHECKED);
+              lv_obj_set_style_text_color(l.lbl, lv_color_hex(0x201200), 0);   // amber 反白
+            }
+          }
+      - script.execute: atc_panel_sync
       - lvgl.slider.update:
           id: bl_slider
           value: !lambda |-
@@ -63,6 +82,7 @@ esp32:
       enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
     sdkconfig_options:
       CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
+      CONFIG_LWIP_MAX_SOCKETS: "16"   # 預設 10 會被 API/web/mDNS/TLS 佔滿,截圖 httpd 起不來(errno 23)
 
 psram:
   mode: octal     # this project needs octal PSRAM; quad boards can't feed the RGB panel
@@ -209,7 +229,8 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false, id(atc_on));
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
           if (id(echo_on)) id(echo_refresh).execute();
           id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
@@ -229,7 +250,8 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false, id(atc_on));
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
           if (id(echo_on)) id(echo_refresh).execute();
           id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
   - platform: template
@@ -250,7 +272,8 @@ number:
           // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), false, id(atc_on));
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
           if (id(echo_on)) id(echo_refresh).execute();
   - platform: template
     name: Poll Interval
@@ -304,6 +327,16 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'
+  # 三指下滑截圖手勢狀態
+  - { id: shot_armed, type: bool,     initial_value: 'false' }
+  - { id: shot_y0,    type: float,    initial_value: '0' }
+  - { id: shot_ms,    type: uint32_t, initial_value: '0' }
+  - { id: sys_tab, type: int, initial_value: '0' }   # SYS 面板分頁:0=SYSTEM 1=ATC CONF
+  # ATC 圖層開關(右下面板設定,各自存 NVS)
+  - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
+  - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
+  - { id: atc_apt_on, type: bool, restore_value: true, initial_value: 'true' }   # 機場
+  - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
   # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
   - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
   - { id: trail_lon, type: 'std::vector<float>' }
@@ -371,6 +404,7 @@ script:
           snprintf(b, sizeof(b), "DIST %4.0f km    BRG %03.0f", sqrtf(e * e + no * no), brg);
           lv_label_set_text(id(sel_l4), b);
       - script.execute: fetch_route
+      - script.execute: atc_panel_sync   # 選機→藏圖層面板;取消選取→ATC 模式下重新顯示
 
   - id: show_sysinfo           # i 鈕開啟時,右下角面板顯示系統資訊(每秒刷新)
     mode: single
@@ -414,6 +448,47 @@ script:
     then:
       - lambda: 'radar_bg::request_route(id(sel_cs_g));'
 
+  - id: take_screenshot        # 三指下滑:快照 framebuffer → :8081/screenshot.bmp,發 HA 事件觸發下載
+    mode: single
+    then:
+      - lambda: |-
+          if (screenshot_capture(id(main_display)))
+            lv_label_set_text(id(status_label), "SCREENSHOT -> :8081/screenshot.bmp");
+          else
+            lv_label_set_text(id(status_label), "SCREENSHOT FAILED");
+      - homeassistant.event:
+          event: esphome.flight_radar_screenshot
+
+  - id: atc_panel_sync         # 右下面板同步:ATC 圖層面板、SYS 分頁列、亮度滑桿
+    mode: single
+    then:
+      - lambda: |-
+          // 圖層設定只在 SYS 的 ATC CONF 分頁;閒置畫面一律天氣/航班(原始行為)
+          bool tab_mode = id(info_on);
+          bool show = tab_mode && id(sys_tab) == 1;
+          if (show) lv_obj_clear_flag(id(atc_panel), LV_OBJ_FLAG_HIDDEN);
+          else      lv_obj_add_flag(id(atc_panel), LV_OBJ_FLAG_HIDDEN);
+          // 分頁列與分頁鈕高亮(amber 航管配色)
+          if (tab_mode) {
+            lv_obj_clear_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
+            bool t1 = id(sys_tab) == 1;
+            lv_obj_set_style_bg_color((lv_obj_t *) id(tab_sys_btn), lv_color_hex(t1 ? 0x040C08 : 0xE8A020), 0);
+            lv_obj_set_style_text_color(id(tab_sys_l), lv_color_hex(t1 ? 0xE8A020 : 0x201200), 0);
+            lv_obj_set_style_bg_color((lv_obj_t *) id(tab_atc_btn), lv_color_hex(t1 ? 0xE8A020 : 0x040C08), 0);
+            lv_obj_set_style_text_color(id(tab_atc_l), lv_color_hex(t1 ? 0x201200 : 0xE8A020), 0);
+          } else {
+            lv_obj_add_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
+          }
+      - if:
+          condition:
+            lambda: 'return id(info_on);'
+          then:
+            - lvgl.widget.show: bl_slider
+            - lvgl.widget.show: brt_l
+          else:
+            - lvgl.widget.hide: bl_slider
+            - lvgl.widget.hide: brt_l
+
   - id: echo_refresh           # 回波:背景查最新圖層資訊
     mode: single
     then:
@@ -427,7 +502,8 @@ script:
       - lambda: |-
           radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
                              id(home_lon).state, id(radar_range).state,
-                             id(map_on), id(echo_on), id(atc_on));
+                             id(map_on), id(echo_on),
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
 
   - id: start_alarm            # 開始響鈴:亮背光、顯示面板、發聲
     mode: single
@@ -773,17 +849,17 @@ interval:
           lv_obj_t *sqs[10] = { id(sq0), id(sq1), id(sq2), id(sq3), id(sq4),
                                 id(sq5), id(sq6), id(sq7), id(sq8), id(sq9) };
           lv_obj_t *vecs[10] = { id(vec0)->obj, id(vec1)->obj, id(vec2)->obj, id(vec3)->obj, id(vec4)->obj, id(vec5)->obj, id(vec6)->obj, id(vec7)->obj, id(vec8)->obj, id(vec9)->obj };
-          lv_obj_t *trs[10][3] = {
-            { id(tr0_0), id(tr0_1), id(tr0_2) },
-            { id(tr1_0), id(tr1_1), id(tr1_2) },
-            { id(tr2_0), id(tr2_1), id(tr2_2) },
-            { id(tr3_0), id(tr3_1), id(tr3_2) },
-            { id(tr4_0), id(tr4_1), id(tr4_2) },
-            { id(tr5_0), id(tr5_1), id(tr5_2) },
-            { id(tr6_0), id(tr6_1), id(tr6_2) },
-            { id(tr7_0), id(tr7_1), id(tr7_2) },
-            { id(tr8_0), id(tr8_1), id(tr8_2) },
-            { id(tr9_0), id(tr9_1), id(tr9_2) },
+          lv_obj_t *trs[10][6] = {
+            { id(tr0_0), id(tr0_1), id(tr0_2), id(tr0_3), id(tr0_4), id(tr0_5) },
+            { id(tr1_0), id(tr1_1), id(tr1_2), id(tr1_3), id(tr1_4), id(tr1_5) },
+            { id(tr2_0), id(tr2_1), id(tr2_2), id(tr2_3), id(tr2_4), id(tr2_5) },
+            { id(tr3_0), id(tr3_1), id(tr3_2), id(tr3_3), id(tr3_4), id(tr3_5) },
+            { id(tr4_0), id(tr4_1), id(tr4_2), id(tr4_3), id(tr4_4), id(tr4_5) },
+            { id(tr5_0), id(tr5_1), id(tr5_2), id(tr5_3), id(tr5_4), id(tr5_5) },
+            { id(tr6_0), id(tr6_1), id(tr6_2), id(tr6_3), id(tr6_4), id(tr6_5) },
+            { id(tr7_0), id(tr7_1), id(tr7_2), id(tr7_3), id(tr7_4), id(tr7_5) },
+            { id(tr8_0), id(tr8_1), id(tr8_2), id(tr8_3), id(tr8_4), id(tr8_5) },
+            { id(tr9_0), id(tr9_1), id(tr9_2), id(tr9_3), id(tr9_4), id(tr9_5) },
           };
           bool atc = id(atc_on);
           if (id(slot_map).size() != 10) id(slot_map).assign(10, -1);
@@ -835,24 +911,34 @@ interval:
               vp[shown][1].x = px2; vp[shown][1].y = py2;
               lv_line_set_points(vecs[shown], vp[shown], 2);
               lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
-              // 歷史軌跡尾跡(3 個逐漸變淡的小點;trail 依資料索引 i 儲存,i>=10 沒有記錄)
-              for (int k = 0; k < 3; k++) {
-                float tlat = (i < 10) ? id(trail_lat)[i * 3 + k] : NAN;
-                float tlon = (i < 10) ? id(trail_lon)[i * 3 + k] : NAN;
-                if (isnan(tlat) || isnan(tlon)) { lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN); continue; }
-                float te = (tlon - lon0) * 111.320f * coslat;
-                float tn = (tlat - lat0) * 110.574f;
-                if (te * te + tn * tn > rng * rng) { lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN); continue; }
-                int tx = 240 + (int) (te / rng * 226.0f);
-                int ty = 240 - (int) (tn / rng * 226.0f);
-                lv_obj_set_pos(trs[shown][k], tx - 1, ty - 1);
-                lv_obj_clear_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              // 歷史軌跡點線:每段歷史放中點+端點兩顆小圓點(至多 6 顆,漸淡),
+              // 與實線向量做出視覺區隔。trail 依資料索引 i 儲存(0=最新),首個無效點即停
+              {
+                int lx = px, ly = py, k = 0, d = 0;
+                for (; k < 3; k++) {
+                  float tlat = (i < 10) ? id(trail_lat)[i * 3 + k] : NAN;
+                  float tlon = (i < 10) ? id(trail_lon)[i * 3 + k] : NAN;
+                  if (isnan(tlat) || isnan(tlon)) break;
+                  float te = (tlon - lon0) * 111.320f * coslat;
+                  float tn = (tlat - lat0) * 110.574f;
+                  if (te * te + tn * tn > rng * rng) break;
+                  int tx = 240 + (int) (te / rng * 226.0f);
+                  int ty = 240 - (int) (tn / rng * 226.0f);
+                  lv_obj_set_pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
+                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  d++;
+                  lv_obj_set_pos(trs[shown][d], tx - 1, ty - 1);
+                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  d++;
+                  lx = tx; ly = ty;
+                }
+                for (; d < 6; d++) lv_obj_add_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
               }
             } else {
               lv_obj_clear_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
               lv_obj_add_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
               lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
-              for (int k = 0; k < 3; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
               lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);   // 還原預設標籤色
             }
             char db[48];
@@ -903,7 +989,7 @@ interval:
           for (int i = shown; i < 10; i++) {
             lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
-            for (int k = 0; k < 3; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
+            for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
             id(slot_map)[i] = -1;
             if (id(slot_angle).size() == 10) id(slot_angle)[i] = -1.0f;
           }
@@ -1025,6 +1111,27 @@ touchscreen:
             lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
           }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
 
 # ---- 字型 ----
 font:
@@ -1109,20 +1216,21 @@ lvgl:
             height: 456
         # 掃描尾巴(4 條漸暗,程式每幀更新座標)
         # 掃描尾巴(8 條,間隔 2°,漸暗連成扇形餘暉)
-        - line: { id: tail0, points: ["240, 240", "240, 20"], line_color: 0x008B45, line_width: 5 }
-        - line: { id: tail1, points: ["240, 240", "240, 20"], line_color: 0x007A3C, line_width: 5 }
-        - line: { id: tail2, points: ["240, 240", "240, 20"], line_color: 0x006A34, line_width: 5 }
-        - line: { id: tail3, points: ["240, 240", "240, 20"], line_color: 0x00592C, line_width: 5 }
-        - line: { id: tail4, points: ["240, 240", "240, 20"], line_color: 0x004A25, line_width: 5 }
-        - line: { id: tail5, points: ["240, 240", "240, 20"], line_color: 0x00391C, line_width: 5 }
-        - line: { id: tail6, points: ["240, 240", "240, 20"], line_color: 0x002814, line_width: 5 }
-        - line: { id: tail7, points: ["240, 240", "240, 20"], line_color: 0x00190C, line_width: 5 }
+        - line: { id: tail0, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x008B45, line_width: 5 }
+        - line: { id: tail1, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x007A3C, line_width: 5 }
+        - line: { id: tail2, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x006A34, line_width: 5 }
+        - line: { id: tail3, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00592C, line_width: 5 }
+        - line: { id: tail4, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x004A25, line_width: 5 }
+        - line: { id: tail5, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00391C, line_width: 5 }
+        - line: { id: tail6, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x002814, line_width: 5 }
+        - line: { id: tail7, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00190C, line_width: 5 }
         # 掃描線(100ms 轉動)
         - line:
             id: sweep_line
             points: ["240, 240", "240, 14"]
             line_color: 0x00A050
             line_width: 2
+            opa: 80%
         # 航班標記 ×10:飛機圖示(依航向旋轉)+ ATC 資料標籤,可點選
         - obj:
             id: ac0
@@ -1144,10 +1252,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq0
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1185,10 +1293,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq1
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1226,10 +1334,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq2
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1267,10 +1375,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq3
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1308,10 +1416,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq4
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1349,10 +1457,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq5
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1390,10 +1498,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq6
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1431,10 +1539,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq7
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1472,10 +1580,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq8
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1513,10 +1621,10 @@ lvgl:
                   src: plane_img
               - obj:
                   id: sq9
-                  x: 12
-                  y: 18
-                  width: 4
-                  height: 4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
                   bg_color: 0x00FF41
                   bg_opa: COVER
                   border_width: 0
@@ -1599,360 +1707,720 @@ lvgl:
             id: tr0_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr0_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr0_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr1_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr1_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr1_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr2_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr2_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr2_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr3_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr3_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr3_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr4_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr4_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr4_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr5_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr5_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr5_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr6_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr6_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr6_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr7_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr7_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr7_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr8_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr8_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr8_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr9_0
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 80%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr9_1
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 50%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
             border_width: 0
-            radius: 0
             pad_all: 0
             hidden: true
         - obj:
             id: tr9_2
             x: -20
             y: -20
-            width: 2
-            height: 2
-            bg_color: 0x00FF41
-            bg_opa: 25%
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
             border_width: 0
-            radius: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
             pad_all: 0
             hidden: true
         # 中心點(你的位置)
@@ -2209,6 +2677,7 @@ lvgl:
                   lv_obj_set_style_text_color(id(atc_btn_l),
                       lv_color_hex(on ? 0x04180C : 0x00C060), 0);
               - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
+              - script.execute: atc_panel_sync
         # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
         - button:
             id: info_btn
@@ -2251,15 +2720,19 @@ lvgl:
                     lv_label_set_text(id(sel_l4), "");
                     id(fetch_route).execute();
                   }
-        # 亮度滑桿(資訊面板下方):拖動即時調背光,存於 light 的 NVS 狀態
+              - script.execute: atc_panel_sync
+        # 亮度滑桿(僅 SYS 選單顯示,amber 配色):拖動即時調背光,存於 light 的 NVS 狀態
         - label:
+            id: brt_l
             x: 500
             y: 406
             text: "BRT"
             text_font: font_small
-            text_color: 0x6E8273
+            text_color: 0xB07818
+            hidden: true
         - slider:
             id: bl_slider
+            hidden: true
             x: 552
             y: 410
             width: 228
@@ -2267,13 +2740,13 @@ lvgl:
             min_value: 5
             max_value: 100
             value: 100
-            bg_color: 0x0A2416
+            bg_color: 0x241A08
             bg_opa: COVER
             radius: 5
             indicator:
-              bg_color: 0x00A050
+              bg_color: 0xB07818
             knob:
-              bg_color: 0x00E66E
+              bg_color: 0xE8A020
               radius: 8
               pad_all: 4
             on_value:
@@ -2282,6 +2755,146 @@ lvgl:
                   call.set_brightness(x / 100.0f);
                   call.set_transition_length(0);
                   call.perform();
+
+        # ===== ATC 圖層設定面板(ATC 模式且未選機時取代右下天氣;不透明,直接蓋住底下文字)=====
+        - obj:
+            id: atc_panel
+            x: 490
+            y: 200
+            width: 302
+            height: 200
+            bg_color: 0x040C08
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - button:
+                  id: asp_btn
+                  x: 10
+                  y: 56
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: asp_btn_l, align: CENTER, text: "AIRSPACE", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_asp_on) = lv_obj_has_state((lv_obj_t *) id(asp_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(asp_btn_l),
+                            lv_color_hex(id(atc_asp_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: rwy_btn
+                  x: 154
+                  y: 56
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: rwy_btn_l, align: CENTER, text: "RUNWAY", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_rwy_on) = lv_obj_has_state((lv_obj_t *) id(rwy_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(rwy_btn_l),
+                            lv_color_hex(id(atc_rwy_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: apt_btn
+                  x: 10
+                  y: 112
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: apt_btn_l, align: CENTER, text: "AIRPORT", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_apt_on) = lv_obj_has_state((lv_obj_t *) id(apt_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(apt_btn_l),
+                            lv_color_hex(id(atc_apt_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: fix_btn
+                  x: 154
+                  y: 112
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: fix_btn_l, align: CENTER, text: "FIXES", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_fix_on) = lv_obj_has_state((lv_obj_t *) id(fix_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(fix_btn_l),
+                            lv_color_hex(id(atc_fix_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+
+        # ===== SYS 面板分頁列(SYS 開啟時顯示;蓋住底下的標題列)=====
+        - obj:
+            id: sys_tabbar
+            x: 490
+            y: 198
+            width: 302
+            height: 40
+            bg_color: 0x040C08
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - button:
+                  id: tab_sys_btn
+                  x: 2
+                  y: 4
+                  width: 146
+                  height: 32
+                  radius: 4
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  widgets:
+                    - label: { id: tab_sys_l, align: CENTER, text: "SYSTEM", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: 'id(sys_tab) = 0;'
+                    - script.execute: atc_panel_sync
+              - button:
+                  id: tab_atc_btn
+                  x: 154
+                  y: 4
+                  width: 146
+                  height: 32
+                  radius: 4
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  widgets:
+                    - label: { id: tab_atc_l, align: CENTER, text: "ATC CONF", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: 'id(sys_tab) = 1;'
+                    - script.execute: atc_panel_sync
 
         # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
         - obj:
