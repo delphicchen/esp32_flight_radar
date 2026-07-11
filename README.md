@@ -76,7 +76,7 @@ First flash must be over **USB** (`/dev/ttyUSB0` or `/dev/ttyACM0`; add yourself
 1. On first boot the panel opens a Wi-Fi hotspot **`Radar-Setup`** (password `12345678`). Connect with your phone and pick your home Wi-Fi in the captive portal.
 2. Register a **free OpenSky account**, then create an **API Client** in your account settings — this gives you a `client_id` and `client_secret` (OpenSky uses OAuth2, not your login password).
 3. Tap the **Wi-Fi icon** (top right) or the **status line** to open the network / API page and enter your OpenSky credentials on screen. You can also fill them at `http://flight-radar.local` or in Home Assistant.
-4. Tap the **coordinates line** to set your latitude / longitude and scan range on the numeric keypad.
+4. Tap the **coordinates line** to set your latitude / longitude, scan range and OpenSky poll interval on the numeric keypad — the page shows a live estimate of the resulting **daily API credit usage** (green / amber / red against the free 4,000-credit quota; cost per fetch grows with range).
 5. Aircraft should appear within a minute. Toggle **MAP** / **ECHO** as you like.
 
 ### Alarm clock
@@ -112,12 +112,12 @@ Press the **ATC** button (in the top-right button row, between **ECHO** and **PW
 - Each aircraft becomes a small **green target square**. Tap it exactly like the plane icon to select/deselect (same `select_slot` behavior).
 - A thin line projects each aircraft's **position 2 minutes ahead** based on its current heading and ground speed.
 - A **dotted fading trail** follows behind, through its last few fetched positions (dots, so it can't be confused with the solid vector line).
-- Labels switch to two lines: callsign on top, `FL<flight level><climb arrow><speed>kt` below (`^` climbing, `v` descending, `=` level).
+- Labels switch to two lines: callsign on top, `FL<flight level><climb arrow><speed>kts` below (`↑` climbing, `↓` descending, `=` level); the label auto-flips to the other side of the target when the velocity vector would run through it.
 - **Conflict alert (red):** any two aircraft within **5.5 km** horizontally *and* **300 m** vertically both turn red; if one of them is the selected aircraft it blinks white/red instead of solid white.
 - **Stale data (yellow):** if OpenSky hasn't updated an aircraft in over 60 s, its label turns yellow and gets a trailing `*`.
 - Selected aircraft (no conflict) stay white.
 - **Static video map:** ATC mode also bakes the `map_data.h` overlays into the base layer — airspace boundaries (CTR-class zones brighter blue, TMA/CTA dimmer), runways with **dashed extended centerlines**, airport squares with ICAO codes, and navaid/fix triangles with names. All of it disappears when ATC mode is switched off.
-- **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
+- **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info + remaining OpenSky API quota) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
 
 ### Screenshots to Home Assistant
 
@@ -266,7 +266,7 @@ esphome run radar.yaml
 1. 首次開機面板會開啟 Wi-Fi 熱點 **`Radar-Setup`**(密碼 `12345678`)。用手機連上,在跳出的設定頁選擇你家的 Wi-Fi。
 2. 註冊**免費的 OpenSky 帳號**,到帳號設定裡建立一個 **API Client**,取得 `client_id` 與 `client_secret`(OpenSky 使用 OAuth2,不是用你的登入密碼)。
 3. 點螢幕右上角的 **Wi-Fi 圖示**或**底部狀態列**開啟網路 / API 設定頁,在螢幕上輸入 OpenSky 憑證。也可以在 `http://flight-radar.local` 或 Home Assistant 填寫。
-4. 點**座標列**用數字鍵盤設定你的經緯度與掃描半徑。
+4. 點**座標列**用數字鍵盤設定你的經緯度、掃描半徑與 OpenSky 輪詢秒數——頁面會即時估算**每日 API credits 消耗**(以免費額度 4000/日 對照,綠/黃/紅顯示;半徑越大單次扣越多)。
 5. 約一分鐘內飛機就會出現。依喜好切換 **MAP** / **ECHO**。
 
 ### 鬧鐘
@@ -302,12 +302,12 @@ esphome run radar.yaml
 - 每架飛機變成一個小小的**綠色目標方塊**,點擊方式跟飛機圖示一樣(照樣呼叫 `select_slot` 選取/取消選取)。
 - 一條細線依目前航向與地速,投射該機**2 分鐘後的推算位置**。
 - **點線漸淡軌跡**跟在機後,連向最近幾次抓取到的舊位置(點狀,不會與實線向量混淆)。
-- 標籤改成兩行:第一行呼號,第二行 `FL高度層+爬升符號+速度kt`(`^` 爬升、`v` 下降、`=` 平飛)。
+- 標籤改成兩行:第一行呼號,第二行 `FL高度層+爬升箭頭+速度kts`(`↑` 爬升、`↓` 下降、`=` 平飛);向量線會穿過標籤時,標籤自動翻到目標另一側。
 - **衝突告警(紅色)**:任兩機水平距離 < **5.5 km** 且高度差 < **300 m** 時雙雙變紅;若其中一台是目前選取的飛機,改成白/紅交替閃爍而非純白。
 - **資料延遲(黃色)**:OpenSky 超過 60 秒沒更新該機資料,標籤變黃並在呼號後加 `*`。
 - 選取中且無衝突的飛機維持白色。
 - **靜態航圖(video map)**:ATC 模式同時把 `map_data.h` 的圖層烤進底圖——管制空域邊界(CTR 類亮藍、TMA/CTA 暗藍)、跑道與**虛線延伸中線**、機場方塊+ICAO 代碼、導航點三角+名稱。關閉 ATC 模式即全部消失。
-- **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
+- **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊+OpenSky API 當日剩餘額度)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
 
 ### 截圖存到 Home Assistant
 

@@ -58,6 +58,16 @@ inline std::string g_speakers;             // HA 喇叭清單:每行 entity_id|f
 inline volatile bool g_speakers_ready = false;
 inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token 錯 / <=0 連不上
 
+inline volatile int g_os_remaining = -1;   // OpenSky X-Rate-Limit-Remaining(-1=未知)
+inline bool g_want_rl = false;             // 只在 states 請求期間擷取(bg task 序列執行,無競態)
+
+inline esp_err_t http_evt_cb(esp_http_client_event_t *evt) {
+  if (evt->event_id == HTTP_EVENT_ON_HEADER && g_want_rl &&
+      strcasecmp(evt->header_key, "X-Rate-Limit-Remaining") == 0)
+    g_os_remaining = atoi(evt->header_value);
+  return ESP_OK;
+}
+
 inline SemaphoreHandle_t mtx() {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   return m;
@@ -77,6 +87,7 @@ inline std::string http_req(const std::string &url, bool post, const std::string
   cfg.buffer_size = 4096;
   cfg.buffer_size_tx = 8192;   // OpenSky JWT 很大
   cfg.method = post ? HTTP_METHOD_POST : HTTP_METHOD_GET;
+  cfg.event_handler = http_evt_cb;   // 擷取 OpenSky 額度 header(g_want_rl 才動作)
   status = -1;
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (c == nullptr) return "";
@@ -143,7 +154,9 @@ inline void do_states(const Job &j) {
            "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
            j.lat - dlat, j.lon - dlon, j.lat + dlat, j.lon + dlon);
   int st = 0;
+  g_want_rl = true;
   std::string r = http_req(url, false, "", nullptr, t_token, st, 131072);
+  g_want_rl = false;
   if (st == 401) { t_token.clear(); return; }   // 下一輪重新換發
   if (st != 200 || r.empty()) {
     ESP_LOGW("radar_bg", "states failed: %d (%u bytes)", st, (unsigned) r.size());
@@ -711,12 +724,13 @@ inline bool screenshot_capture(esphome::rpi_dpi_rgb::RpiDpiRgb *disp) {
   return true;
 }
 
-// ---- 系統資訊(i 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 填入右下角六個 label ----
+// ---- 系統資訊(i 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 / API 額度 填入右下角六個 label ----
 inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
                                lv_obj_t *l2, lv_obj_t *l3, lv_obj_t *l4, int rssi) {
   char b[48];
   lv_label_set_text(cs, "SYSTEM");
-  snprintf(b, sizeof(b), "ESP32-S3  CPU %u MHz", (unsigned) esp_rom_get_cpu_ticks_per_us());
+  snprintf(b, sizeof(b), "ESP32-S3 %uMHz   RSSI %d",
+           (unsigned) esp_rom_get_cpu_ticks_per_us(), rssi);
   lv_label_set_text(route, b);
   snprintf(b, sizeof(b), "RAM   %4u / %4u KB",
            (unsigned) (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
@@ -733,7 +747,12 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
            ap ? ap->size / 1048576.0f : 0.0f);
   lv_label_set_text(l3, b);
   uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
-  snprintf(b, sizeof(b), "UP %ud %02u:%02u   RSSI %d", (unsigned) (up / 86400),
-           (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60), rssi);
+  if (radar_bg::g_os_remaining >= 0)
+    snprintf(b, sizeof(b), "UP %ud %02u:%02u   API %d", (unsigned) (up / 86400),
+             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
+             radar_bg::g_os_remaining);   // OpenSky 當日剩餘呼叫額度
+  else
+    snprintf(b, sizeof(b), "UP %ud %02u:%02u   API ----", (unsigned) (up / 86400),
+             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60));
   lv_label_set_text(l4, b);
 }
