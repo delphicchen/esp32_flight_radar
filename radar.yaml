@@ -1209,10 +1209,14 @@ font:
   - file: "gfonts://Roboto Condensed"
     id: font_tiny
     size: 14
-    # ATC 標籤的爬升/下降箭頭:Roboto Condensed 沒有 U+2191/2193,
-    # 從 Noto Sans Symbols 補(比例字幅;CJK 字型的箭頭是全形,會過大)
+    # ATC 標籤的爬升/下降箭頭:Roboto Condensed 沒有 U+2191/2193。
+    # ESPHome extras 的 offset_y 用「該字型自己的 ascender」算,行高卻依主字型,
+    # 所以 extras 字型 14px 的 ascender 必須 ≈13 才對得齊基線。
+    # DejaVu Sans:ascender=13(吻合)、箭頭 5px 寬 1bpp 仍有箭頭形;
+    # Noto Sans Symbols ascender=21 → 箭頭整根掉到基線下;gfonts Roboto 缺這兩字。
+    # (字型檔取自 LVGL 內附,Bitstream Vera/DejaVu 授權,可自由散布)
     extras:
-      - file: "gfonts://Noto Sans Symbols"
+      - file: "fonts/DejaVuSans.ttf"
         glyphs: ["↑", "↓"]
 
 image:

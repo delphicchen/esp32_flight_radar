@@ -206,6 +206,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 - Taiwan airspace boundaries — [Taiwan CAA eAIP](https://ais.caa.gov.tw/) ENR 2.1
 - Airspace boundaries elsewhere (optional) — [openAIP](https://www.openaip.net/) (CC BY-NC)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
+- Climb/descent arrow glyphs — [DejaVu Sans](https://dejavu-fonts.github.io/) (Bitstream Vera / DejaVu license, `fonts/DejaVuSans.ttf`)
 
 Please respect each provider's free-tier terms; this project is a hobby build, not a service.
 
@@ -396,6 +397,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 - 台灣管制空域邊界 — [民航局 eAIP](https://ais.caa.gov.tw/) ENR 2.1
 - 其他地區空域邊界(選用)— [openAIP](https://www.openaip.net/)(CC BY-NC)
 - 概念啟發 — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
+- 爬升/下降箭頭字型 — [DejaVu Sans](https://dejavu-fonts.github.io/)(Bitstream Vera / DejaVu 授權,`fonts/DejaVuSans.ttf`)
 
 請遵守各資料來源的免費方案條款;本專案是自用興趣作品,並非商業服務。
 
