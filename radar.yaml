@@ -65,6 +65,10 @@ esphome:
               lv_obj_set_style_text_color(l.lbl, lv_color_hex(0x201200), 0);   // amber 反白
             }
           }
+          if (id(poll_when_off)) {
+            lv_obj_add_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(poff_btn_l), lv_color_hex(0x04180C), 0);
+          }
       - script.execute: atc_panel_sync
       - lvgl.slider.update:
           id: bl_slider
@@ -332,6 +336,10 @@ globals:
   - { id: shot_y0,    type: float,    initial_value: '0' }
   - { id: shot_ms,    type: uint32_t, initial_value: '0' }
   - { id: sys_tab, type: int, initial_value: '0' }   # SYS 面板分頁:0=SYSTEM 1=ATC CONF
+  - id: poll_when_off
+    type: bool
+    restore_value: true
+    initial_value: 'false'    # 背光關閉時仍持續抓取(設定頁勾選)
   # ATC 圖層開關(右下面板設定,各自存 NVS)
   - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
@@ -671,7 +679,7 @@ interval:
           }
           if (id(poll_tick) >= (int) id(poll_interval).state) {
             if (wifi::global_wifi_component->is_connected() &&
-                id(backlight).current_values.is_on()) {      // 背光關=暫停抓取
+                (id(backlight).current_values.is_on() || id(poll_when_off))) {   // 背光關=暫停抓取(可設定例外)
               id(poll_tick) = 0;
               id(fetch_flights).execute();
             }
@@ -885,10 +893,10 @@ interval:
             bool lside = atc && sinf(rad) > 0.0f;
             if ((uint8_t) lside != id(lbl_side)[shown]) {
               id(lbl_side)[shown] = lside ? 1 : 0;
-              lv_obj_set_pos(imgs[shown], lside ? 76 : 0, 6);
-              lv_obj_set_pos(sqs[shown], lside ? 87 : 11, 17);
+              lv_obj_set_pos(imgs[shown], lside ? 94 : 0, 6);
+              lv_obj_set_pos(sqs[shown], lside ? 105 : 11, 17);
               if (lside) {
-                lv_obj_set_width(dbs[shown], 74);
+                lv_obj_set_width(dbs[shown], 88);
                 lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_RIGHT, 0);
                 lv_obj_set_pos(dbs[shown], 0, 4);
               } else {
@@ -898,7 +906,7 @@ interval:
               }
             }
             // 圖示中心對準位置(左置標籤時符號在容器右側)
-            lv_obj_set_pos(marks[shown], lside ? px - 90 : px - 14, py - 20);
+            lv_obj_set_pos(marks[shown], lside ? px - 108 : px - 14, py - 20);
             lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
             bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
             lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
@@ -1091,7 +1099,7 @@ interval:
           condition:
             lambda: |-
               return id(echo_on) && wifi::global_wifi_component->is_connected() &&
-                     id(backlight).current_values.is_on();
+                     (id(backlight).current_values.is_on() || id(poll_when_off));
           then:
             - script.execute: echo_refresh
   # 每 5 秒刷新 WiFi 狀態與座標顯示(只重繪那兩行)
@@ -1201,9 +1209,10 @@ font:
   - file: "gfonts://Roboto Condensed"
     id: font_tiny
     size: 14
-    # ATC 標籤的爬升/下降箭頭:Roboto Condensed 沒有 U+2191/2193,從 Noto Sans TC 補
+    # ATC 標籤的爬升/下降箭頭:Roboto Condensed 沒有 U+2191/2193,
+    # 從 Noto Sans Symbols 補(比例字幅;CJK 字型的箭頭是全形,會過大)
     extras:
-      - file: "gfonts://Noto Sans TC"
+      - file: "gfonts://Noto Sans Symbols"
         glyphs: ["↑", "↓"]
 
 image:
@@ -1281,7 +1290,7 @@ lvgl:
             id: ac0
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1322,7 +1331,7 @@ lvgl:
             id: ac1
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1363,7 +1372,7 @@ lvgl:
             id: ac2
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1404,7 +1413,7 @@ lvgl:
             id: ac3
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1445,7 +1454,7 @@ lvgl:
             id: ac4
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1486,7 +1495,7 @@ lvgl:
             id: ac5
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1527,7 +1536,7 @@ lvgl:
             id: ac6
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1568,7 +1577,7 @@ lvgl:
             id: ac7
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1609,7 +1618,7 @@ lvgl:
             id: ac8
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -1650,7 +1659,7 @@ lvgl:
             id: ac9
             x: -200
             y: -200
-            width: 104
+            width: 122
             height: 42
             bg_opa: TRANSP
             border_width: 0
@@ -3124,6 +3133,33 @@ lvgl:
               - label: { align: CENTER, text: "CANCEL", text_font: font_mid, text_color: 0x00C060 }
             on_click:
               - lvgl.page.show: main_page
+        # 背光關閉時是否持續抓取(勾選=關屏也更新;耗 API 額度,估算列會反映)
+        - button:
+            id: poff_btn
+            x: 460
+            y: 74
+            width: 336
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: poff_btn_l
+                  align: CENTER
+                  text: "UPDATE WHEN SCREEN OFF"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(poll_when_off) = lv_obj_has_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
+                  lv_obj_set_style_text_color(id(poff_btn_l),
+                      lv_color_hex(id(poll_when_off) ? 0x04180C : 0x00C060), 0);
         # 手搓數字鍵盤(與整體風格一致)
         - button:
             x: 460
