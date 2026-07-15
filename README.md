@@ -8,15 +8,13 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 ---
 
-## 📸 Screenshot / 畫面
+## 📸 Demo / 畫面
 
-![ESP32 Flight Radar](docs/screenshot.jpg)
+![ESP32 Flight Radar demo](docs/demo.gif)
 
 ## 🎬 Demo video / 示範影片
 
-[![Watch the demo on YouTube](https://img.youtube.com/vi/3JHcLvoOxh8/maxresdefault.jpg)](https://youtu.be/3JHcLvoOxh8)
-
-▶ **[Watch on YouTube / 在 YouTube 觀看](https://youtu.be/3JHcLvoOxh8)**
+▶ **[Watch the full demo video / 觀看完整示範影片](docs/demo.mp4)**
 
 
 ---
