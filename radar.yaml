@@ -291,6 +291,18 @@ number:
     optimistic: true
     restore_value: true
     entity_category: config
+  - platform: template
+    name: Poll Interval Alt
+    id: poll_interval_alt
+    min_value: 5
+    max_value: 300
+    step: 5
+    initial_value: 15           # 免費來源(airplanes.live/adsb.lol)抓取間隔;無每日額度可較密
+    unit_of_measurement: s
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
 
 # ---- 航班資料抓取(OpenSky OAuth2)----
 http_request:
@@ -340,6 +352,10 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'    # 背光關閉時仍持續抓取(設定頁勾選)
+  - id: data_src
+    type: int
+    restore_value: true
+    initial_value: '0'        # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)
   # ATC 圖層開關(右下面板設定,各自存 NVS)
   - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
@@ -373,7 +389,7 @@ script:
           radar_bg::request_states(id(opensky_client_id).state,
                                    id(opensky_client_secret).state,
                                    id(home_lat).state, id(home_lon).state,
-                                   id(radar_range).state);
+                                   id(radar_range).state, id(data_src));
 
   - id: select_slot
     parameters:
@@ -673,11 +689,15 @@ interval:
           id(poll_tick) += 1;
           bool creds = !id(opensky_client_id).state.empty() &&
                        !id(opensky_client_secret).state.empty();
-          if (!creds) {
+          if (id(data_src) == 0 && !creds) {   // 免費來源不需憑證,擋門只對 OpenSky
             lv_label_set_text(id(status_label), "SET OPENSKY CREDENTIALS");
             return;
           }
-          if (id(poll_tick) >= (int) id(poll_interval).state) {
+          // OpenSky 失敗冷卻中(bg task 走免費來源)→ 節奏也切到免費來源的間隔
+          bool cooling = (millis() / 1000) < radar_bg::g_os_cooldown_until;
+          int itv = (id(data_src) != 0 || cooling) ? (int) id(poll_interval_alt).state
+                                                   : (int) id(poll_interval).state;
+          if (id(poll_tick) >= itv) {
             if (wifi::global_wifi_component->is_connected() &&
                 (id(backlight).current_values.is_on() || id(poll_when_off))) {   // 背光關=暫停抓取(可設定例外)
               id(poll_tick) = 0;
@@ -688,7 +708,7 @@ interval:
       - lambda: |-
           if (radar_bg::g_auth_fail) {
             radar_bg::g_auth_fail = false;
-            lv_label_set_text(id(status_label), "AUTH FAILED - CHECK CREDENTIALS");
+            lv_label_set_text(id(status_label), "OPENSKY AUTH FAIL - USING FALLBACK");
           }
           static bool echo_init = false;
           if (!echo_init && id(echo_on) && millis() > 8000 &&
@@ -832,11 +852,14 @@ interval:
             }
           }
           char b[64];
+          // 免費來源(手選或 OpenSky fallback)時在狀態列標示資料出處
+          const char *stag = radar_bg::g_last_src == 1 ? "  [A.LIVE]"
+                           : radar_bg::g_last_src == 2 ? "  [ADSB.LOL]" : "";
           auto t = id(rtc_time).now();
           if (t.is_valid())
-            snprintf(b, sizeof(b), "AC:%d   UPD %02d:%02d:%02d", n, t.hour, t.minute, t.second);
+            snprintf(b, sizeof(b), "AC:%d   UPD %02d:%02d:%02d%s", n, t.hour, t.minute, t.second, stag);
           else
-            snprintf(b, sizeof(b), "AC:%d", n);
+            snprintf(b, sizeof(b), "AC:%d%s", n, stag);
           lv_label_set_text(id(status_label), b);
           static bool first_data = true;
           if (first_data) {
@@ -1023,6 +1046,13 @@ interval:
       # 設定頁:依 LAT/RANGE/POLL 即時估算每日 OpenSky credits 消耗
       - lambda: |-
           if (!id(settings_page)->is_showing()) return;
+          if (id(data_src) != 0) {   // 免費來源:無每日額度,只提示範圍與半徑上限
+            lv_label_set_text(id(est_l), id(data_src) == 1
+                ? "AIRPLANES.LIVE: FREE, NO DAILY QUOTA (POLL2 5-300s, RANGE <= 463km)"
+                : "ADSB.LOL: FREE, NO DAILY QUOTA (POLL2 5-300s, RANGE <= 463km)");
+            lv_obj_set_style_text_color(id(est_l), lv_color_hex(0x30C060), 0);
+            return;
+          }
           float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
           float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
           int ps = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll)));
@@ -2658,11 +2688,24 @@ lvgl:
                   lv_textarea_set_text((lv_obj_t *) id(ta_rng), b);
                   snprintf(b, sizeof(b), "%.0f", id(poll_interval).state);
                   lv_textarea_set_text((lv_obj_t *) id(ta_poll), b);
+                  snprintf(b, sizeof(b), "%.0f", id(poll_interval_alt).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_poll2), b);
+                  // SRC 三鈕與 data_src 同步(checked 態 + 文字色)
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int k = 0; k < 3; k++) {
+                    if (k == id(data_src)) lv_obj_add_state(sb[k], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[k], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[k],
+                        lv_color_hex(k == id(data_src) ? 0x04180C : 0x00C060), 0);
+                  }
                   id(kb_target) = 0;
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x00E66E), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
               - lvgl.page.show: settings_page
         - line:
             points: ["490, 196", "792, 196"]
@@ -3009,14 +3052,14 @@ lvgl:
         - label:
             x: 30
             y: 20
-            text: "LOCATION / RANGE / POLL"
+            text: "LOCATION / RANGE / POLL / SRC"
             text_font: font_mid
             text_color: 0x00E66E
-        # 依 LAT/RANGE/POLL 即時估算每日 OpenSky credits 消耗(1s interval 更新)
+        # 依 LAT/RANGE/POLL 即時估算每日 OpenSky credits 消耗(1s interval 更新);免費來源顯示無額度提示
         - label:
             id: est_l
             x: 30
-            y: 392
+            y: 434
             width: 410
             text: ""
             text_font: font_small
@@ -3047,6 +3090,7 @@ lvgl:
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
         - textarea:
             <<: *ta_style
             id: ta_lon
@@ -3058,6 +3102,7 @@ lvgl:
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x00E66E), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
         - textarea:
             <<: *ta_style
             id: ta_rng
@@ -3069,6 +3114,7 @@ lvgl:
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x00E66E), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
         - label:
             x: 350
             y: 200
@@ -3089,16 +3135,39 @@ lvgl:
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
                   lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
         - label:
             x: 350
             y: 260
             text: "s"
             text_font: font_small
             text_color: 0x6E8273
+        # 免費來源(airplanes.live / adsb.lol)專用抓取間隔
+        - label: { x: 30,  y: 318, text: "POLL2", text_font: font_small, text_color: 0x9AE6B4 }
+        - textarea:
+            <<: *ta_style
+            id: ta_poll2
+            y: 308
+            max_length: 3
+            accepted_chars: "0123456789"
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 4;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x00E66E), 0);
+        - label:
+            x: 350
+            y: 320
+            text: "s"
+            text_font: font_small
+            text_color: 0x6E8273
         # SET / CANCEL
         - button:
             x: 30
-            y: 318
+            y: 368
             width: 145
             height: 56
             radius: 6
@@ -3123,10 +3192,14 @@ lvgl:
                   if (ps >= 10 && ps <= 300) {
                     auto c = id(poll_interval).make_call(); c.set_value(ps); c.perform();
                   }
+                  int p2 = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll2)));
+                  if (p2 >= 5 && p2 <= 300) {
+                    auto c = id(poll_interval_alt).make_call(); c.set_value(p2); c.perform();
+                  }
               - lvgl.page.show: main_page
         - button:
             x: 195
-            y: 318
+            y: 368
             width: 145
             height: 56
             radius: 6
@@ -3137,6 +3210,109 @@ lvgl:
               - label: { align: CENTER, text: "CANCEL", text_font: font_mid, text_color: 0x00C060 }
             on_click:
               - lvgl.page.show: main_page
+        # 航班資料來源(radio 三選一;OpenSky 失敗自動 fallback 到免費來源 10 分鐘)
+        - button:
+            id: src_btn0
+            x: 460
+            y: 16
+            width: 104
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn0_l
+                  align: CENTER
+                  text: "OPENSKY"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 0;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 0) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 0 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;   // 手動選來源即重置 fallback 冷卻
+        - button:
+            id: src_btn1
+            x: 572
+            y: 16
+            width: 104
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn1_l
+                  align: CENTER
+                  text: "A.LIVE"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 1;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 1) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 1 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;
+        - button:
+            id: src_btn2
+            x: 684
+            y: 16
+            width: 112
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn2_l
+                  align: CENTER
+                  text: "ADSB.LOL"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 2;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 2) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 2 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;
         # 背光關閉時是否持續抓取(勾選=關屏也更新;耗 API 額度,估算列會反映)
         - button:
             id: poff_btn
@@ -3181,7 +3357,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '7');
         - button:
             x: 544
@@ -3199,7 +3376,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '8');
         - button:
             x: 628
@@ -3217,7 +3395,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '9');
         - button:
             x: 712
@@ -3235,7 +3414,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_del_char(ta);
         - button:
             x: 460
@@ -3253,7 +3433,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '4');
         - button:
             x: 544
@@ -3271,7 +3452,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '5');
         - button:
             x: 628
@@ -3289,7 +3471,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '6');
         - button:
             x: 712
@@ -3307,7 +3490,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '.');
         - button:
             x: 460
@@ -3325,7 +3509,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '1');
         - button:
             x: 544
@@ -3343,7 +3528,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '2');
         - button:
             x: 628
@@ -3361,7 +3547,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '3');
         - button:
             x: 712
@@ -3379,7 +3566,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '-');
         - button:
             x: 460
@@ -3397,7 +3585,8 @@ lvgl:
                   lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
                                : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
                                : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
-                                                    : (lv_obj_t *) id(ta_poll);
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
                   lv_textarea_add_char(ta, '0');
         - button:
             x: 628
@@ -3425,6 +3614,10 @@ lvgl:
                   int ps = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll)));
                   if (ps >= 10 && ps <= 300) {
                     auto c = id(poll_interval).make_call(); c.set_value(ps); c.perform();
+                  }
+                  int p2 = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll2)));
+                  if (p2 >= 5 && p2 <= 300) {
+                    auto c = id(poll_interval_alt).make_call(); c.set_value(p2); c.perform();
                   }
               - lvgl.page.show: main_page
 

@@ -23,7 +23,8 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 ### Features
 
-- **Live flight radar** — pulls aircraft states from the [OpenSky Network](https://opensky-network.org/) around your coordinates and plots them on a 480×480 radar scope with a rotating sweep, fading trail, and target glow as the beam passes each aircraft.
+- **Live flight radar** — pulls aircraft states from the [OpenSky Network](https://opensky-network.org/), [airplanes.live](https://airplanes.live/) or [adsb.lol](https://adsb.lol/) around your coordinates and plots them on a 480×480 radar scope with a rotating sweep, fading trail, and target glow as the beam passes each aircraft.
+- **Selectable data source + automatic fallback** — a **SRC** selector on the settings page picks OpenSky (OAuth2, 4,000 credits/day) or the free no-key **airplanes.live** / **adsb.lol** APIs, each with its own poll interval (**POLL2**, 5–300 s). If an OpenSky fetch fails (bad credentials, quota exhausted, outage) the device automatically falls back to the free sources for 10 minutes, then retries OpenSky; the status line and SYS panel show which source is active.
 - **ATC-style labels** — each aircraft shows its callsign, flight level and speed, with a heading-oriented plane icon. Tap any aircraft to see its **origin → destination** (via [adsbdb.com](https://www.adsbdb.com/)), altitude, speed, heading, vertical rate, distance and bearing.
 - **ATC mode** — toggle button switches the plane icons to bare **target squares** with a **2‑minute velocity vector**, a **dotted fading history trail**, and a local **STCA-style conflict alert** (two aircraft within 5.5 km / 300 m get flagged red); stale data (no update for 60 s) is flagged yellow with a `*` suffix. Turn it off to instantly restore the normal plane-icon view.
 - **Weather echo overlay** — optional rain-radar layer from [RainViewer](https://www.rainviewer.com/), downloaded, decoded and composited **entirely on a background core** so the UI never stutters. Toggle with an on-screen button.
@@ -72,9 +73,9 @@ First flash must be over **USB** (`/dev/ttyUSB0` or `/dev/ttyACM0`; add yourself
 ### First-time setup
 
 1. On first boot the panel opens a Wi-Fi hotspot **`Radar-Setup`** (password `12345678`). Connect with your phone and pick your home Wi-Fi in the captive portal.
-2. Register a **free OpenSky account**, then create an **API Client** in your account settings — this gives you a `client_id` and `client_secret` (OpenSky uses OAuth2, not your login password).
+2. *(Only needed for the OpenSky source)* Register a **free OpenSky account**, then create an **API Client** in your account settings — this gives you a `client_id` and `client_secret` (OpenSky uses OAuth2, not your login password). If you pick **airplanes.live** or **adsb.lol** as the source instead, no account or key is required at all.
 3. Tap the **Wi-Fi icon** (top right) or the **status line** to open the network / API page and enter your OpenSky credentials on screen. You can also fill them at `http://flight-radar.local` or in Home Assistant.
-4. Tap the **coordinates line** to set your latitude / longitude, scan range and OpenSky poll interval on the numeric keypad; a checkbox chooses whether fetching **continues while the backlight is off** (default: paused). The page shows a live estimate of the resulting **daily API credit usage** (green / amber / red against the free 4,000-credit quota; cost per fetch grows with range).
+4. Tap the **coordinates line** to set your latitude / longitude, scan range and OpenSky poll interval on the numeric keypad; the **SRC** row picks the data source (OPENSKY / A.LIVE / ADSB.LOL) and **POLL2** sets the poll interval used with the free sources; a checkbox chooses whether fetching **continues while the backlight is off** (default: paused). With OpenSky selected the page shows a live estimate of the resulting **daily API credit usage** (green / amber / red against the free 4,000-credit quota; cost per fetch grows with range); the free sources have no daily quota but cap the radius at 250 NM (≈463 km).
 5. Aircraft should appear within a minute. Toggle **MAP** / **ECHO** as you like.
 
 ### Alarm clock
@@ -112,10 +113,10 @@ Press the **ATC** button (in the top-right button row, between **ECHO** and **PW
 - A **dotted fading trail** follows behind, through its last few fetched positions (dots, so it can't be confused with the solid vector line).
 - Labels switch to two lines: callsign on top, `FL<flight level><climb arrow><speed>kts` below (`↑` climbing, `↓` descending, `=` level); the label auto-flips to the other side of the target when the velocity vector would run through it.
 - **Conflict alert (red):** any two aircraft within **5.5 km** horizontally *and* **300 m** vertically both turn red; if one of them is the selected aircraft it blinks white/red instead of solid white.
-- **Stale data (yellow):** if OpenSky hasn't updated an aircraft in over 60 s, its label turns yellow and gets a trailing `*`.
+- **Stale data (yellow):** if the data source hasn't updated an aircraft in over 60 s, its label turns yellow and gets a trailing `*`.
 - Selected aircraft (no conflict) stay white.
 - **Static video map:** ATC mode also bakes the `map_data.h` overlays into the base layer — airspace boundaries (CTR-class zones brighter blue, TMA/CTA dimmer), runways with **dashed extended centerlines**, airport squares with ICAO codes, and navaid/fix triangles with names. All of it disappears when ATC mode is switched off.
-- **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info + remaining OpenSky API quota) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
+- **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info + remaining OpenSky API quota, or the active free source when on airplanes.live / adsb.lol) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
 
 ### Screenshots to Home Assistant
 
@@ -145,7 +146,8 @@ All of these are Home Assistant / web entities, stored in NVS:
 | OpenSky Client ID / Secret | OAuth2 API client credentials |
 | Home Latitude / Longitude | Radar center (your location) |
 | Radar Range | Scan radius in km (10–500) |
-| Poll Interval | Seconds between fetches (default 30 → 2880/day, within the 4000/day quota) |
+| Poll Interval | Seconds between OpenSky fetches (default 30 → 2880/day, within the 4000/day quota) |
+| Poll Interval Alt | Seconds between fetches on the free sources (airplanes.live / adsb.lol, 5–300, default 15) |
 | HA URL | Home Assistant address for speaker scan (empty = `http://homeassistant.local:8123`) |
 | HA Token | HA long-lived access token used by the SCAN button |
 | Alarm Speaker | Default HA `media_player` entity to ring through (type it or use SCAN) |
@@ -194,7 +196,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 
 ### Data sources & credits
 
-- Aircraft states — [OpenSky Network](https://opensky-network.org/)
+- Aircraft states — [OpenSky Network](https://opensky-network.org/), [airplanes.live](https://airplanes.live/), [adsb.lol](https://adsb.lol/)
 - Route lookup — [adsbdb.com](https://www.adsbdb.com/)
 - Weather radar — [RainViewer](https://www.rainviewer.com/)
 - Local weather — [Open-Meteo](https://open-meteo.com/)
@@ -214,7 +216,8 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 
 ### 功能
 
-- **即時航班雷達** — 從 [OpenSky Network](https://opensky-network.org/) 取得你座標周圍的航班,繪製在 480×480 雷達盤上,附旋轉掃描線、漸暗餘暉,以及掃描線掃過飛機時的高亮效果。
+- **即時航班雷達** — 從 [OpenSky Network](https://opensky-network.org/)、[airplanes.live](https://airplanes.live/) 或 [adsb.lol](https://adsb.lol/) 取得你座標周圍的航班,繪製在 480×480 雷達盤上,附旋轉掃描線、漸暗餘暉,以及掃描線掃過飛機時的高亮效果。
+- **可選資料來源 + 自動備援** — 設定頁的 **SRC** 列可選 OpenSky(OAuth2,每日 4000 credits)或免金鑰的 **airplanes.live** / **adsb.lol** 免費 API,免費來源有獨立輪詢間隔(**POLL2**,5–300 秒)。OpenSky 抓取失敗(憑證錯誤、額度用盡、服務中斷)會自動改用免費來源 10 分鐘後再回試;狀態列與 SYS 面板會顯示目前實際來源。
 - **航管風格標籤** — 每架飛機顯示呼號、飛航高度層與速度,搭配依航向旋轉的飛機圖示。點選任一飛機可查看**起點 → 目的地**(透過 [adsbdb.com](https://www.adsbdb.com/))、高度、速度、航向、垂直速率、距離與方位。
 - **ATC 模式** — 按鈕切換,飛機圖示換成純**目標方塊**,附**未來 2 分鐘速度向量線**、**漸淡的點線歷史軌跡**,以及本地端 **STCA 風格衝突告警**(兩機水平距離 < 5.5km 且高度差 < 300m 觸發紅色);資料超過 60 秒未更新則標為黃色並加 `*`。再按一次立即還原成預設的飛機圖示畫面。
 - **氣象回波圖層** — 可選的降雨雷達層,資料來自 [RainViewer](https://www.rainviewer.com/);下載、解碼、合成**全部在背景核心完成**,主畫面完全不卡。以螢幕按鈕開關。
@@ -263,9 +266,9 @@ esphome run radar.yaml
 ### 首次設定
 
 1. 首次開機面板會開啟 Wi-Fi 熱點 **`Radar-Setup`**(密碼 `12345678`)。用手機連上,在跳出的設定頁選擇你家的 Wi-Fi。
-2. 註冊**免費的 OpenSky 帳號**,到帳號設定裡建立一個 **API Client**,取得 `client_id` 與 `client_secret`(OpenSky 使用 OAuth2,不是用你的登入密碼)。
+2. *(只有選用 OpenSky 來源才需要)*註冊**免費的 OpenSky 帳號**,到帳號設定裡建立一個 **API Client**,取得 `client_id` 與 `client_secret`(OpenSky 使用 OAuth2,不是用你的登入密碼)。若改選 **airplanes.live** 或 **adsb.lol** 來源,完全不用註冊或金鑰。
 3. 點螢幕右上角的 **Wi-Fi 圖示**或**底部狀態列**開啟網路 / API 設定頁,在螢幕上輸入 OpenSky 憑證。也可以在 `http://flight-radar.local` 或 Home Assistant 填寫。
-4. 點**座標列**用數字鍵盤設定你的經緯度、掃描半徑與 OpenSky 輪詢秒數,並可勾選**背光關閉時是否持續抓取**(預設暫停)——頁面會即時估算**每日 API credits 消耗**(以免費額度 4000/日 對照,綠/黃/紅顯示;半徑越大單次扣越多)。
+4. 點**座標列**用數字鍵盤設定你的經緯度、掃描半徑與 OpenSky 輪詢秒數;**SRC** 列選擇資料來源(OPENSKY / A.LIVE / ADSB.LOL),**POLL2** 設定免費來源的輪詢秒數;並可勾選**背光關閉時是否持續抓取**(預設暫停)。選 OpenSky 時頁面會即時估算**每日 API credits 消耗**(以免費額度 4000/日 對照,綠/黃/紅顯示;半徑越大單次扣越多);免費來源無每日額度,但查詢半徑上限 250 海里(約 463 km)。
 5. 約一分鐘內飛機就會出現。依喜好切換 **MAP** / **ECHO**。
 
 ### 鬧鐘
@@ -303,10 +306,10 @@ esphome run radar.yaml
 - **點線漸淡軌跡**跟在機後,連向最近幾次抓取到的舊位置(點狀,不會與實線向量混淆)。
 - 標籤改成兩行:第一行呼號,第二行 `FL高度層+爬升箭頭+速度kts`(`↑` 爬升、`↓` 下降、`=` 平飛);向量線會穿過標籤時,標籤自動翻到目標另一側。
 - **衝突告警(紅色)**:任兩機水平距離 < **5.5 km** 且高度差 < **300 m** 時雙雙變紅;若其中一台是目前選取的飛機,改成白/紅交替閃爍而非純白。
-- **資料延遲(黃色)**:OpenSky 超過 60 秒沒更新該機資料,標籤變黃並在呼號後加 `*`。
+- **資料延遲(黃色)**:資料來源超過 60 秒沒更新該機資料,標籤變黃並在呼號後加 `*`。
 - 選取中且無衝突的飛機維持白色。
 - **靜態航圖(video map)**:ATC 模式同時把 `map_data.h` 的圖層烤進底圖——管制空域邊界(CTR 類亮藍、TMA/CTA 暗藍)、跑道與**虛線延伸中線**、機場方塊+ICAO 代碼、導航點三角+名稱。關閉 ATC 模式即全部消失。
-- **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊+OpenSky API 當日剩餘額度)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
+- **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊+OpenSky API 當日剩餘額度;用免費來源時改顯示目前來源)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
 
 ### 截圖存到 Home Assistant
 
@@ -336,7 +339,8 @@ automation:
 | OpenSky Client ID / Secret | OAuth2 API 憑證 |
 | Home Latitude / Longitude | 雷達中心(你的位置) |
 | Radar Range | 掃描半徑(公里,10–500) |
-| Poll Interval | 抓取間隔秒數(預設 30 → 每日 2880 次,在 4000 次/日額度內) |
+| Poll Interval | OpenSky 抓取間隔秒數(預設 30 → 每日 2880 次,在 4000 次/日額度內) |
+| Poll Interval Alt | 免費來源(airplanes.live / adsb.lol)抓取間隔秒數(5–300,預設 15) |
 | HA URL | 喇叭掃描用的 HA 位址(留空 = `http://homeassistant.local:8123`) |
 | HA Token | SCAN 鈕使用的 HA 長期存取權杖 |
 | Alarm Speaker | 預設發聲的 HA `media_player` 實體(手填或用 SCAN 選) |
@@ -385,7 +389,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 
 ### 資料來源與致謝
 
-- 航班狀態 — [OpenSky Network](https://opensky-network.org/)
+- 航班狀態 — [OpenSky Network](https://opensky-network.org/)、[airplanes.live](https://airplanes.live/)、[adsb.lol](https://adsb.lol/)
 - 航線查詢 — [adsbdb.com](https://www.adsbdb.com/)
 - 氣象雷達 — [RainViewer](https://www.rainviewer.com/)
 - 在地天氣 — [Open-Meteo](https://open-meteo.com/)

@@ -40,6 +40,7 @@ struct Job {
   int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers
   std::string cid, sec, callsign;
   float lat, lon, range;
+  int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
 };
 
 // ---- task → main 的結果(g_states_ready/g_route_ready 當柵欄)----
@@ -60,6 +61,8 @@ inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token
 
 inline volatile int g_os_remaining = -1;   // OpenSky X-Rate-Limit-Remaining(-1=未知)
 inline bool g_want_rl = false;             // 只在 states 請求期間擷取(bg task 序列執行,無競態)
+inline volatile uint32_t g_os_cooldown_until = 0;  // OpenSky 失敗冷卻期限(millis 秒),期間走免費來源
+inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(0/1/2,-1=尚未成功)
 
 inline esp_err_t http_evt_cb(esp_http_client_event_t *evt) {
   if (evt->event_id == HTTP_EVENT_ON_HEADER && g_want_rl &&
@@ -144,8 +147,8 @@ inline bool ensure_token(const Job &j) {
   return true;
 }
 
-inline void do_states(const Job &j) {
-  if (!ensure_token(j)) return;
+inline bool do_states_opensky(const Job &j) {
+  if (!ensure_token(j)) return false;
   float coslat = cosf(j.lat * 3.14159265f / 180.0f);
   float dlat = j.range / 110.574f;
   float dlon = j.range / (111.320f * coslat);
@@ -157,10 +160,10 @@ inline void do_states(const Job &j) {
   g_want_rl = true;
   std::string r = http_req(url, false, "", nullptr, t_token, st, 131072);
   g_want_rl = false;
-  if (st == 401) { t_token.clear(); return; }   // 下一輪重新換發
+  if (st == 401) { t_token.clear(); return false; }   // 下一輪重新換發
   if (st != 200 || r.empty()) {
     ESP_LOGW("radar_bg", "states failed: %d (%u bytes)", st, (unsigned) r.size());
-    return;
+    return false;
   }
   std::vector<AcInfo> acs;
   float lat0 = j.lat, lon0 = j.lon;
@@ -196,7 +199,77 @@ inline void do_states(const Job &j) {
   xSemaphoreTake(mtx(), portMAX_DELAY);
   g_result = std::move(acs);
   g_states_ready = true;
+  g_last_src = 0;
   xSemaphoreGive(mtx());
+  return true;
+}
+
+// airplanes.live / adsb.lol(readsb /v2/point,免金鑰):回傳英制,這裡換算回公制
+// 使 UI/ATC 端與 OpenSky 完全同構;lc 由 now(epoch ms)- seen 還原成 last_contact
+inline bool do_states_v2(const Job &j, int src) {
+  float r_nm = j.range / 1.852f;
+  if (r_nm > 250.0f) r_nm = 250.0f;   // v2 API 半徑上限 250 nm(463 km)
+  char url[160];
+  snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f",
+           src == 2 ? "api.adsb.lol" : "api.airplanes.live", j.lat, j.lon, r_nm);
+  int st = 0;
+  std::string r = http_req(url, false, "", nullptr, "", st, 131072);
+  if (st != 200 || r.empty()) {
+    ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
+    return false;
+  }
+  std::vector<AcInfo> acs;
+  float lat0 = j.lat, lon0 = j.lon;
+  float coslat = cosf(j.lat * 3.14159265f / 180.0f);
+  esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+    uint32_t now_s = (uint32_t) ((root["now"] | 0.0) / 1000.0);
+    JsonArray arr = root["ac"].as<JsonArray>();
+    if (arr.isNull()) return true;
+    for (JsonVariant v : arr) {
+      JsonObject a = v.as<JsonObject>();
+      if (a.isNull()) continue;
+      if (a["alt_baro"].is<const char *>()) continue;   // "ground" = 地面,跳過
+      float alat = a["lat"] | NAN, alon = a["lon"] | NAN;
+      if (isnan(alat) || isnan(alon)) continue;
+      AcInfo ac;
+      ac.lat = alat; ac.lon = alon;
+      ac.alt = (a["alt_baro"] | 0.0f) * 0.3048f;    // ft → m
+      ac.vel = (a["gs"] | 0.0f) * 0.514444f;        // kt → m/s
+      ac.trk = a["track"] | 0.0f;
+      ac.vr  = (a["baro_rate"] | 0.0f) * 0.00508f;  // ft/min → m/s
+      float seen = a["seen"] | 0.0f;
+      ac.lc = now_s > (uint32_t) seen ? now_s - (uint32_t) seen : 0;
+      const char *c = a["flight"] | "";
+      ac.cs = c;
+      while (!ac.cs.empty() && ac.cs.back() == ' ') ac.cs.pop_back();
+      if (ac.cs.empty()) ac.cs = "?";
+      float e = (alon - lon0) * 111.320f * coslat;
+      float n = (alat - lat0) * 110.574f;
+      ac.dist = sqrtf(e * e + n * n);
+      acs.push_back(ac);
+    }
+    return true;
+  });
+  std::sort(acs.begin(), acs.end(),
+            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_result = std::move(acs);
+  g_states_ready = true;
+  g_last_src = src;
+  xSemaphoreGive(mtx());
+  return true;
+}
+
+inline void do_states(const Job &j) {
+  if (j.src == 1 || j.src == 2) { do_states_v2(j, j.src); return; }
+  // OpenSky 主線:冷卻中直接走免費來源;失敗設 10 分鐘冷卻,到期自動回試
+  uint32_t now = millis() / 1000;
+  if (now >= g_os_cooldown_until) {
+    if (do_states_opensky(j)) { g_os_cooldown_until = 0; return; }
+    g_os_cooldown_until = now + 600;
+    ESP_LOGW("radar_bg", "opensky failed, fallback to free sources for 600s");
+  }
+  if (!do_states_v2(j, 1)) do_states_v2(j, 2);   // airplanes.live → adsb.lol
 }
 
 inline void do_route(const Job &j) {
@@ -416,9 +489,9 @@ inline void ensure_task() {
 }
 
 inline void request_states(const std::string &cid, const std::string &sec,
-                           float lat, float lon, float range) {
+                           float lat, float lon, float range, int src) {
   ensure_task();
-  Job *j = new Job{1, cid, sec, "", lat, lon, range};
+  Job *j = new Job{1, cid, sec, "", lat, lon, range, src};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
 }
 
@@ -747,7 +820,11 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
            ap ? ap->size / 1048576.0f : 0.0f);
   lv_label_set_text(l3, b);
   uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
-  if (radar_bg::g_os_remaining >= 0)
+  if (radar_bg::g_last_src > 0)   // 免費來源(手選或 fallback):無額度,顯示來源名
+    snprintf(b, sizeof(b), "UP %ud %02u:%02u   SRC %s", (unsigned) (up / 86400),
+             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
+             radar_bg::g_last_src == 2 ? "ADSB.LOL" : "A.LIVE");
+  else if (radar_bg::g_os_remaining >= 0)
     snprintf(b, sizeof(b), "UP %ud %02u:%02u   API %d", (unsigned) (up / 86400),
              (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
              radar_bg::g_os_remaining);   // OpenSky 當日剩餘呼叫額度
