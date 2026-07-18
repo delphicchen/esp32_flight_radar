@@ -890,27 +890,27 @@ interval:
             float e  = (id(ac_lon)[i] - lon0) * 111.320f * coslat + vkm * sinf(rad);
             float no = (id(ac_lat)[i] - lat0) * 110.574f          + vkm * cosf(rad);
             if (e * e + no * no > rng * rng) continue;
-            int px = 240 + (int) (e / rng * 226.0f);
-            int py = 240 - (int) (no / rng * 226.0f);
+            int px = RS(240) + (int) (e / rng * (float) RADAR_R);
+            int py = RS(240) - (int) (no / rng * (float) RADAR_R);
             // 標籤避讓:ATC 模式且向量線朝右(航向 0~180)時,標籤翻到符號左側
             if (id(lbl_side).size() != 10) id(lbl_side).assign(10, 0);
             bool lside = atc && sinf(rad) > 0.0f;
             if ((uint8_t) lside != id(lbl_side)[shown]) {
               id(lbl_side)[shown] = lside ? 1 : 0;
-              lv_obj_set_pos(imgs[shown], lside ? 94 : 0, 6);
-              lv_obj_set_pos(sqs[shown], lside ? 105 : 11, 17);
+              lv_obj_set_pos(imgs[shown], lside ? RS(94) : 0, RS(6));
+              lv_obj_set_pos(sqs[shown], lside ? RS(105) : RS(11), RS(17));
               if (lside) {
-                lv_obj_set_width(dbs[shown], 88);
+                lv_obj_set_width(dbs[shown], RS(88));
                 lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_RIGHT, 0);
-                lv_obj_set_pos(dbs[shown], 0, 4);
+                lv_obj_set_pos(dbs[shown], 0, RS(4));
               } else {
                 lv_obj_set_width(dbs[shown], LV_SIZE_CONTENT);
                 lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_LEFT, 0);
-                lv_obj_set_pos(dbs[shown], 32, 4);
+                lv_obj_set_pos(dbs[shown], RS(32), RS(4));
               }
             }
             // 圖示中心對準位置(左置標籤時符號在容器右側)
-            lv_obj_set_pos(marks[shown], lside ? px - 108 : px - 14, py - 20);
+            lv_obj_set_pos(marks[shown], lside ? px - RS(108) : px - RS(14), py - RS(20));
             lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
             bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
             lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
@@ -935,8 +935,8 @@ interval:
               float n2 = no + vkm2 * cosf(rad);
               float d2 = sqrtf(e2 * e2 + n2 * n2);
               if (d2 > rng) { e2 *= rng / d2; n2 *= rng / d2; }
-              int px2 = 240 + (int) (e2 / rng * 226.0f);
-              int py2 = 240 - (int) (n2 / rng * 226.0f);
+              int px2 = RS(240) + (int) (e2 / rng * (float) RADAR_R);
+              int py2 = RS(240) - (int) (n2 / rng * (float) RADAR_R);
               static lv_point_t vp[10][2];
               vp[shown][0].x = px;  vp[shown][0].y = py;
               vp[shown][1].x = px2; vp[shown][1].y = py2;
@@ -953,8 +953,8 @@ interval:
                   float te = (tlon - lon0) * 111.320f * coslat;
                   float tn = (tlat - lat0) * 110.574f;
                   if (te * te + tn * tn > rng * rng) break;
-                  int tx = 240 + (int) (te / rng * 226.0f);
-                  int ty = 240 - (int) (tn / rng * 226.0f);
+                  int tx = RS(240) + (int) (te / rng * (float) RADAR_R);
+                  int ty = RS(240) - (int) (tn / rng * (float) RADAR_R);
                   lv_obj_set_pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
                   lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
                   d++;
@@ -1070,9 +1070,9 @@ interval:
           static lv_point_t lp[9][2];
           for (int k = 0; k < 9; k++) {
             float a = (cur - k * 1.0f) * DEG;       // 第0條=掃描線,其後每條退 1°
-            lp[k][0].x = 240; lp[k][0].y = 240;
-            lp[k][1].x = 240 + (lv_coord_t) (226.0f * sinf(a));
-            lp[k][1].y = 240 - (lv_coord_t) (226.0f * cosf(a));
+            lp[k][0].x = RS(240); lp[k][0].y = RS(240);
+            lp[k][1].x = RS(240) + (lv_coord_t) ((float) RADAR_R * sinf(a));
+            lp[k][1].y = RS(240) - (lv_coord_t) ((float) RADAR_R * cosf(a));
             lv_line_set_points(lines[k], lp[k], 2);
           }
           // 航班點:被掃描線掃過→高亮,之後依時間漸暗(不受幀率影響)

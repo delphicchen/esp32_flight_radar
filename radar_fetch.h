@@ -23,6 +23,13 @@
 #endif
 #define RADAR_CX (RADAR_CANVAS / 2)        // canvas center
 #define RADAR_R  (RADAR_CANVAS / 2 - 2)    // usable radar radius
+// UI scale factor vs the reference 800x480 layout (456px canvas). The LVGL
+// layouts for other resolutions are generated from that reference by
+// tools/scale_layout.py with the same round-half-up rule, so RS() of a
+// reference-layout pixel value always lands on the generated widget position.
+// Used by the YAML lambdas in common/core.yaml for page-coordinate math.
+#define RADAR_SCALE ((float) RADAR_CANVAS / 456.0f)
+#define RS(v) ((int) ((v) * RADAR_SCALE + 0.5f))
 #include <string>
 #include <vector>
 #include <algorithm>
