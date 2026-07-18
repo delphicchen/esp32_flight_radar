@@ -1,0 +1,26 @@
+# =============================================================
+# Flight Radar — Waveshare ESP32-P4-WIFI6-Touch-LCD-7B
+#   ESP32-P4 + 1024x600 MIPI-DSI panel + GT911 touch,
+#   Wi-Fi 6 via an ESP32-C6 co-processor (esp-hosted / SDIO).
+#
+# Same firmware and 1024x600 layout as the S3-5B; only the board
+# package (display bus, PSRAM, Wi-Fi co-processor) differs.
+# See radar.yaml for the package structure, and the board file
+# for the pins that must be verified against your unit.
+# =============================================================
+
+substitutions:
+  disp_w: "1024"         # panel width  (px)
+  disp_h: "600"          # panel height (px)
+  radar_canvas: "570"    # radar canvas side (456 * 1.25) — matches ui/ui_1024x600.yaml
+  # font sizes scaled x1.25 from the 800x480 layout
+  f_small: "28"
+  f_mid: "35"
+  f_clock: "80"
+  f_mono: "23"
+  f_tiny: "18"
+
+packages:
+  core:  !include common/core.yaml
+  board: !include boards/esp32p4_dsi_1024x600.yaml
+  ui:    !include ui/ui_1024x600.yaml

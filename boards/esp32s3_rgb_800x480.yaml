@@ -1,0 +1,118 @@
+# =====================================================================
+#  Board: ESP32-S3 + 800x480 parallel-RGB (ST7262) + GT911 touch
+#  (generic "esp32-s3-5inch-rgb-001"; also Waveshare ESP32-S3-Touch-LCD-5,
+#   Sunton ESP32-8048S050, Guition JC8048W550 after matching the pins).
+#  Resolution / radar geometry come from the substitutions in the entry
+#  file (radar.yaml); the C++ helpers read them via the build flags below.
+# =====================================================================
+
+# ---- Resolution-driven build flags for the C++ includes ----
+#  SCREEN_W/H     screenshot framebuffer size (radar_fetch.h)
+#  RADAR_CANVAS   side of the square radar canvas (must equal the LVGL
+#                 base_canvas size in the matching ui/ package)
+esphome:
+  platformio_options:
+    build_flags:
+      - "-DSCREEN_W=${disp_w}"
+      - "-DSCREEN_H=${disp_h}"
+      - "-DRADAR_CANVAS=${radar_canvas}"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
+    sdkconfig_options:
+      CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
+      CONFIG_LWIP_MAX_SOCKETS: "16"   # 預設 10 會被 API/web/mDNS/TLS 佔滿,截圖 httpd 起不來(errno 23)
+
+psram:
+  mode: octal     # this project needs octal PSRAM; quad boards can't feed the RGB panel
+  speed: 120MHz   # 原廠 sdkconfig 即為 120MHz;80MHz 頻寬不足會撕裂/雜訊
+                  # vendor sdkconfig uses 120MHz; at 80MHz the bandwidth is too low -> tearing/noise
+
+# ---- 背光 Backlight (LEDC PWM) ----
+output:
+  - platform: ledc
+    pin: GPIO1                  # backlight PWM
+    id: bl_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: bl_pwm
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- 觸控 Touch (GT911, I2C) ----
+i2c:
+  sda: GPIO16                   # GT911 SDA
+  scl: GPIO15                   # GT911 SCL
+  frequency: 400kHz
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    update_interval: 20ms     # 預設 50ms;縮短輪詢降低觸控延遲(I2C 負擔極小)
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
+
+# ---- 螢幕 Display(parallel RGB / DPI panel, driven by LVGL:交給 LVGL 驅動,不自動更新、不自動清屏)----
+display:
+  - platform: rpi_dpi_rgb
+    id: main_display
+    update_interval: never
+    auto_clear_enabled: false
+    color_order: RGB
+    pclk_frequency: 17MHz       # pixel clock; panel timing below comes from the vendor datasheet
+    pclk_inverted: true
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    de_pin: GPIO40              # data enable
+    hsync_pin: GPIO38           # horizontal sync
+    vsync_pin: GPIO39           # vertical sync
+    pclk_pin: GPIO41            # pixel clock
+    hsync_pulse_width: 8
+    hsync_back_porch: 8
+    hsync_front_porch: 4
+    vsync_pulse_width: 8
+    vsync_back_porch: 8
+    vsync_front_porch: 4
+    data_pins:                  # RGB565: R0-R4 / G0-G5 / B0-B4, LSB first
+      red: [46, 3, 8, 18, 17]
+      green: [14, 13, 12, 11, 10, 9]
+      blue: [0, 45, 48, 47, 21]
