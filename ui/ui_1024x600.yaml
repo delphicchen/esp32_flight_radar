@@ -45,7 +45,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -86,7 +86,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -127,7 +127,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -168,7 +168,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -209,7 +209,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -250,7 +250,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -291,7 +291,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -332,7 +332,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -373,7 +373,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -414,7 +414,7 @@ lvgl:
             x: -250
             y: -250
             width: 153
-            height: 53
+            height: 80
             bg_opa: TRANSP
             border_width: 0
             pad_all: 0
@@ -1674,6 +1674,26 @@ lvgl:
                         lv_obj_set_style_text_color(id(fix_btn_l),
                             lv_color_hex(id(atc_fix_on) ? 0x201200 : 0xE8A020), 0);
                     - script.execute: rebuild_base
+              - button:
+                  id: route_btn
+                  x: 13
+                  y: 203
+                  width: 353
+                  height: 43
+                  radius: 5
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: route_btn_l, align: CENTER, text: "ROUTE", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        // 標籤起訖站行(逐架背景查 adsbdb 並快取);只動標籤,不需重建底圖
+                        id(atc_route_on) = lv_obj_has_state((lv_obj_t *) id(route_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(route_btn_l),
+                            lv_color_hex(id(atc_route_on) ? 0x201200 : 0xE8A020), 0);
 
         # ===== SYS 面板分頁列(SYS 開啟時顯示;蓋住底下的標題列)=====
         - obj:

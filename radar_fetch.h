@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <map>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -69,7 +70,7 @@ struct AcInfo {
 };
 
 struct Job {
-  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers
+  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers, 6 = route cache
   std::string cid, sec, callsign;
   float lat, lon, range;
   int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
@@ -327,6 +328,38 @@ inline void do_route(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
+// ---- 全機隊起訖站快取(ATC ROUTE 標籤行)----
+// callsign → "KHH-KIX";"" = 查詢中,"-" = 查無資料(不再重查)。
+// 與 g_route 同一把 mtx 保護;背景 task 逐架查 adsbdb,查過即快取。
+inline std::map<std::string, std::string> g_rcache;
+
+inline void do_route_cache(const Job &j) {
+  int st = 0;
+  std::string r = http_req("https://api.adsbdb.com/v0/callsign/" + j.callsign,
+                           false, "", nullptr, "", st);
+  std::string rt = "-";
+  if (st == 200 && !r.empty()) {
+    esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+      JsonObject fr = root["response"]["flightroute"];
+      if (!fr.isNull()) {
+        const char *o = fr["origin"]["iata_code"] | "";
+        const char *d = fr["destination"]["iata_code"] | "";
+        if (o[0] != 0 && d[0] != 0) rt = std::string(o) + "-" + d;
+      }
+      return true;
+    });
+  } else if (st != 200 && st != 404) {
+    // 非 404 的失敗(網路/限流)不寫入快取,之後重試
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_rcache.erase(j.callsign);
+    xSemaphoreGive(mtx());
+    return;
+  }
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_rcache[j.callsign] = rt;
+  xSemaphoreGive(mtx());
+}
+
 // Open-Meteo 目前天氣(免金鑰、開源資料)→ g_wx
 inline void do_weather(const Job &j) {
   char url[224];
@@ -504,6 +537,7 @@ inline void task_fn(void *arg) {
     if (xQueueReceive(queue(), &j, portMAX_DELAY) == pdTRUE && j != nullptr) {
       if (j->type == 1) do_states(*j);
       else if (j->type == 2) do_route(*j);
+      else if (j->type == 6) do_route_cache(*j);
       else if (j->type == 3) do_echo(*j);
       else if (j->type == 4) do_weather(*j);
       else if (j->type == 5) do_speakers(*j);
@@ -550,6 +584,31 @@ inline void request_route(const std::string &cs) {
   ensure_task();
   Job *j = new Job{2, "", "", cs, 0, 0, 0};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+}
+
+// 查起訖站快取;未知就排一次背景查詢。回傳 "" = 還不知道,"-" = 查無資料。
+// 佇列滿(深度 4)時清掉「查詢中」標記,下一幀重試,路線會分幾秒陸續補齊。
+inline std::string route_cache_get(const std::string &cs) {
+  if (cs.empty()) return "";
+  ensure_task();
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  auto it = g_rcache.find(cs);
+  if (it != g_rcache.end()) {
+    std::string v = it->second;
+    xSemaphoreGive(mtx());
+    return v;
+  }
+  if (g_rcache.size() > 120) g_rcache.clear();   // 防跨日航班累積吃 PSRAM
+  g_rcache[cs] = "";                             // 標記查詢中(去重)
+  xSemaphoreGive(mtx());
+  Job *j = new Job{6, "", "", cs, 0, 0, 0};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) {
+    delete j;
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_rcache.erase(cs);
+    xSemaphoreGive(mtx());
+  }
+  return "";
 }
 
 }  // namespace radar_bg

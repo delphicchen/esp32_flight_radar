@@ -53,11 +53,12 @@ esphome:
             lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
           }
           // ATC 圖層開關按鈕:還原 NVS 儲存的勾選狀態
-          struct { bool on; lv_obj_t *btn, *lbl; } lay[4] = {
+          struct { bool on; lv_obj_t *btn, *lbl; } lay[5] = {
             { id(atc_asp_on), (lv_obj_t *) id(asp_btn), id(asp_btn_l) },
             { id(atc_rwy_on), (lv_obj_t *) id(rwy_btn), id(rwy_btn_l) },
             { id(atc_apt_on), (lv_obj_t *) id(apt_btn), id(apt_btn_l) },
             { id(atc_fix_on), (lv_obj_t *) id(fix_btn), id(fix_btn_l) },
+            { id(atc_route_on), (lv_obj_t *) id(route_btn), id(route_btn_l) },
           };
           for (auto &l : lay) {
             if (l.on) {
@@ -344,6 +345,7 @@ globals:
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
   - { id: atc_apt_on, type: bool, restore_value: true, initial_value: 'true' }   # 機場
   - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
+  - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
   # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
   - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
   - { id: trail_lon, type: 'std::vector<float>' }
@@ -977,6 +979,14 @@ interval:
               const char *arrow = (id(ac_vr)[i] > 0.5f) ? "↑" : (id(ac_vr)[i] < -0.5f ? "↓" : "=");
               snprintf(db, sizeof(db), "%s%s\nFL%03.0f%s%.0fkts", id(ac_cs)[i].c_str(),
                        stale ? "*" : "", id(ac_alt)[i] * 0.032808f, arrow, id(ac_vel)[i] * 1.9438f);
+              if (id(atc_route_on)) {
+                // 起訖站第三行(例 KHH-KIX):快取未命中會排背景查詢,查到前不顯示
+                std::string rt = radar_bg::route_cache_get(id(ac_cs)[i]);
+                if (!rt.empty() && rt != "-") {
+                  size_t dl = strlen(db);
+                  snprintf(db + dl, sizeof(db) - dl, "\n%s", rt.c_str());
+                }
+              }
             } else {
               snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
                        id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
