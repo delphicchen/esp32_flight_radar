@@ -1,0 +1,155 @@
+# =====================================================================
+#  Board: Waveshare ESP32-S3-Touch-LCD-5B
+#         ESP32-S3 (16 MB flash, 8 MB octal PSRAM)
+#         1024x600 parallel-RGB (EK9716/ST7262-class) panel + GT911 touch
+#
+#  The "5" (800x480) and "5B" (1024x600) share one PCB — only the panel
+#  and its timings differ (Waveshare selects them with a macro in
+#  waveshare_lcd_port.h). Pins below follow the published ESP32-S3-Touch-
+#  LCD-5 pin map; LCD reset/enable, backlight and touch-reset go through a
+#  CH422G I2C IO-expander (unlike the generic board's direct GPIO1).
+#
+#  >>> VERIFY on your unit: the RGB panel timings (porches / pclk) and the
+#      CH422G pin numbers vary between Waveshare revisions. Cross-check
+#      against your board's schematic / waveshare_lcd_port.h and tune the
+#      timings if the image tears or rolls. <<<
+#
+#  Resolution / radar geometry come from the substitutions in the entry
+#  file (radar-s3-5b.yaml).
+# =====================================================================
+
+# ---- Resolution-driven build flags for the C++ includes ----
+esphome:
+  platformio_options:
+    build_flags:
+      - "-DSCREEN_W=${disp_w}"
+      - "-DSCREEN_H=${disp_h}"
+      - "-DRADAR_CANVAS=${radar_canvas}"
+      # This board uses the `mipi_rgb` display driver (see below), whose C++
+      # class differs from rpi_dpi_rgb, so the framebuffer screenshot helper
+      # is compiled out here (three-finger screenshot gesture is a no-op).
+      - "-DRADAR_DISPLAY_RGB=0"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true   # 120MHz octal PSRAM
+    sdkconfig_options:
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      # --- 1024x600 記憶體吃緊:把 WiFi/LWIP 緩衝與 TLS 握手記憶體挪出內部 RAM ---
+      # 症狀:esp-sha/esp-aes "Failed to allocate memory" → TLS 連線失敗、抓不到資料
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"   # WiFi/LWIP 緩衝改配 PSRAM,釋放內部 RAM
+      CONFIG_MBEDTLS_DYNAMIC_BUFFER: "y"          # TLS 緩衝握手時才配、用完即釋放(降峰值)
+      CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN: "y"  # 收/發用不同大小,配合 dynamic buffer
+      CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN: "8192"  # 預設 16384;減半再省一半 TLS 緩衝
+
+psram:
+  mode: octal
+  speed: 120MHz   # 1024x600 needs the full octal bandwidth; 80MHz will tear
+
+# ---- IO expander (LCD reset/enable, backlight, touch reset) ----
+i2c:
+  sda: GPIO8                    # GT911 + CH422G SDA
+  scl: GPIO9                    # GT911 + CH422G SCL
+  frequency: 400kHz
+
+ch422g:
+  - id: io_ex                   # CH422G — registers have fixed I2C addresses
+
+# ---- Backlight ----
+# Waveshare routes the backlight through a CH422G pin (on/off, no PWM), so
+# `backlight` is a binary light here. The firmware's brightness slider then
+# acts as on/off. If your revision wires the backlight to a real PWM GPIO,
+# swap this for `output: ledc` + `light: monochromatic` (as the 800x480 board).
+output:
+  - platform: gpio
+    id: bl_output
+    pin:
+      ch422g: io_ex
+      number: 2                 # EXIO2 = panel enable / backlight (shared w/ display)
+      allow_other_uses: true
+
+light:
+  - platform: binary
+    id: backlight
+    output: bl_output
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- Touch (GT911, I2C, reset via CH422G) ----
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    update_interval: 20ms
+    interrupt_pin: GPIO4        # GT911 INT
+    reset_pin:
+      ch422g: io_ex
+      number: 1                 # EXIO1 = touch reset (verify)
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
+
+# ---- Display (parallel RGB, driven by LVGL) ----
+# NOTE: this board needs the `mipi_rgb` driver, added in ESPHome 2025.9.0.
+# Combined with the project-wide LVGL-v8 requirement (<= 2026.3.x, see README),
+# build this board with ESPHome in the 2025.9 – 2026.3 range (2026.3.x recommended).
+# Uses the newer `mipi_rgb` driver + ESPHome's built-in Waveshare panel model,
+# which carries the RGB pins (DE5/HSYNC46/VSYNC3/PCLK7 + data pins), the CH422G
+# reset(EXIO3)/enable(EXIO2) pins and the official 1024x600 timings. Unlike
+# `rpi_dpi_rgb` (pclk capped at 30 MHz -> only ~35 Hz here, visibly flickering),
+# `mipi_rgb` allows a higher pclk so the panel can run at ~60 Hz.
+#   H_total = 1024+30+145+170 = 1369 ; V_total = 600+2+23+12 = 637
+#   52 MHz / (1369*637) ≈ 59.6 Hz. If the image tears/noises, the S3 PSRAM
+#   bandwidth can't keep up -> lower pclk (a bit more flicker); if it flickers
+#   as a whole, raise pclk.
+display:
+  - platform: mipi_rgb
+    id: main_display
+    model: WAVESHARE-5-1024X600
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions: ${disp_w}x${disp_h}   # tuple form: the model's inherited native size is 800x480
+    pclk_frequency: 52MHz
+    reset_pin:
+      ch422g: io_ex
+      number: 3                 # EXIO3 = LCD reset
+    # EXIO2 is the shared panel-enable / backlight line. The display pulls it
+    # high to light the panel; the `backlight` light above also drives it so
+    # the PWR button can blank the screen. allow_other_uses lets both bind it.
+    enable_pin:
+      ch422g: io_ex
+      number: 2
+      allow_other_uses: true

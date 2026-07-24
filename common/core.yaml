@@ -1,0 +1,1206 @@
+# =============================================================
+# Flight Radar 桌面擺件 — Phase 1.5(UI 改用 LVGL,解決閃爍/延遲)
+# 板子:esp32-s3-5inch-rgb-001(腳位/時序已實機驗證)
+#
+# 功能:
+#   • WiFi 配置頁:熱點「Radar-Setup」(密碼 12345678)→ captive portal
+#   • Home Assistant 自動發現;背光/重啟/WiFi訊號/螢幕按鈕 = HA 實體
+#   • HA 氣候讀數示範:換掉 sensor.YOUR_TEMPERATURE_SENSOR
+#   • LVGL UI:只重繪變動區域 → 無黑屏閃爍
+#   • OTA:改韌體走 WiFi,esphome run 會自動選
+# =============================================================
+
+esphome:
+  name: flight-radar
+  friendly_name: Flight Radar
+  platformio_options:
+    lib_deps:
+      - kikuchan98/pngle@^1.0.0
+  includes:
+    - map_data.h
+    - radar_fetch.h
+    - alarm.h
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          // 開機重建底圖(map_on/echo_on 已自 NVS 還原),同時蓋掉 PSRAM 未初始化雜訊
+          // 喇叭下拉選單:字型無 FontAwesome 箭頭字形(U+F078),移除符號免警告
+          LvDropdownType *dds[6] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd), id(tz_dd) };
+          for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
+          // 還原時區:NVS 的 index → POSIX TZ 執行期套用,並把下拉同步到該項
+          id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
+          lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
+          // 鎖定所有頁面的捲動:避免三指截圖手勢把頁面拖出位移,截到偏移後的內容
+          lv_obj_t *pgs[4] = { id(main_page)->obj, id(alarm_page)->obj,
+                               id(config_page)->obj, id(settings_page)->obj };
+          for (auto *p : pgs) lv_obj_clear_flag(p, LV_OBJ_FLAG_SCROLLABLE);
+          radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
+                             id(home_lon).state, id(radar_range).state,
+                             id(map_on), id(echo_on),
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
+      - delay: 3s
+      - lambda: |-
+          lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+          lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          if (id(map_on)) {
+            lv_obj_add_state((lv_obj_t *) id(map_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(map_btn_l), lv_color_hex(0x04180C), 0);
+          }
+          if (id(echo_on)) {
+            lv_obj_add_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(echo_btn_l), lv_color_hex(0x04180C), 0);
+          }
+          if (id(atc_on)) {
+            lv_obj_add_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
+          }
+          // ATC 圖層開關按鈕:還原 NVS 儲存的勾選狀態
+          struct { bool on; lv_obj_t *btn, *lbl; } lay[5] = {
+            { id(atc_asp_on), (lv_obj_t *) id(asp_btn), id(asp_btn_l) },
+            { id(atc_rwy_on), (lv_obj_t *) id(rwy_btn), id(rwy_btn_l) },
+            { id(atc_apt_on), (lv_obj_t *) id(apt_btn), id(apt_btn_l) },
+            { id(atc_fix_on), (lv_obj_t *) id(fix_btn), id(fix_btn_l) },
+            { id(atc_route_on), (lv_obj_t *) id(route_btn), id(route_btn_l) },
+          };
+          for (auto &l : lay) {
+            if (l.on) {
+              lv_obj_add_state(l.btn, LV_STATE_CHECKED);
+              lv_obj_set_style_text_color(l.lbl, lv_color_hex(0x201200), 0);   // amber 反白
+            }
+          }
+          if (id(poll_when_off)) {
+            lv_obj_add_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(poff_btn_l), lv_color_hex(0x04180C), 0);
+          }
+          if (id(units_imperial)) {
+            lv_obj_add_state((lv_obj_t *) id(units_btn), LV_STATE_CHECKED);
+            lv_label_set_text(id(units_btn_l), "UNITS: IMPERIAL");
+            lv_obj_set_style_text_color(id(units_btn_l), lv_color_hex(0x04180C), 0);
+          }
+      - script.execute: atc_panel_sync
+      - lvgl.slider.update:
+          id: bl_slider
+          value: !lambda |-
+            // 開機同步滑桿到 NVS 還原的背光亮度
+            return id(backlight).current_values.get_brightness() * 100.0f;
+
+logger:
+  level: INFO
+
+wifi:
+  ap:
+    ssid: "Radar-Setup"
+    password: "12345678"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+
+time:
+  - platform: sntp
+    id: rtc_time
+    timezone: Asia/Taipei
+    on_time:
+      - seconds: '*'          # 每秒更新時鐘(LVGL 只重繪時鐘那塊區域)
+        then:
+          - lvgl.label.update:
+              id: clock_label
+              text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
+      - seconds: 0            # 每分鐘檢查鬧鐘
+        then:
+          - lambda: |-
+              auto t = id(rtc_time).now();
+              if (!t.is_valid() || id(alarm_ringing)) return;
+              int iso = alarmpk::iso_today(t.day_of_week);
+              uint32_t A[4] = { id(al0), id(al1), id(al2), id(al3) };
+              std::string sp[4] = { id(al_spk0).state, id(al_spk1).state,
+                                    id(al_spk2).state, id(al_spk3).state };
+              for (int i = 0; i < 4; i++) {
+                if (alarmpk::due(A[i], t.hour, t.minute, iso)) {
+                  // 該組鬧鐘的專屬喇叭,留空 → 預設喇叭
+                  id(ring_spk) = sp[i].empty() ? id(alarm_speaker).state : sp[i];
+                  ESP_LOGI("alarm", "alarm %d fired -> %s", i, id(ring_spk).c_str());
+                  id(start_alarm).execute();
+                  break;
+                }
+              }
+
+# ---- 可在網頁(http://flight-radar.local)或 HA 填寫的設定 ----
+# 全部存 NVS,斷電保留,改了不用重編韌體
+text:
+  - platform: template
+    name: OpenSky Client ID
+    id: opensky_client_id
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: OpenSky Client Secret
+    id: opensky_client_secret
+    mode: password
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: HA URL                # HA 位址;空值=http://homeassistant.local:8123,不通請填 IP
+    id: ha_url
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: HA Token              # HA 長期存取權杖(個人資料頁→安全性),供喇叭掃描用
+    id: ha_token
+    mode: password
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm Speaker         # 預設喇叭(media_player 實體);各組鬧鐘未指定時用它
+    id: alarm_speaker
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm 1 Speaker       # 鬧鐘 1 專屬喇叭,留空 = 用 Alarm Speaker
+    id: al_spk0
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm 2 Speaker
+    id: al_spk1
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm 3 Speaker
+    id: al_spk2
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm 4 Speaker
+    id: al_spk3
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Alarm Sound URL       # 鬧鈴音檔 URL(mp3),留空則只發 media_player 動作
+    id: alarm_media
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+number:
+  - platform: template
+    name: Home Latitude
+    id: home_lat
+    min_value: -90
+    max_value: 90
+    step: 0.0001
+    initial_value: 25.0330      # 預設台北,請在網頁/HA 改成你家座標
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
+          radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
+                             id(home_lon).state, id(radar_range).state,
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
+          if (id(echo_on)) id(echo_refresh).execute();
+          id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
+  - platform: template
+    name: Home Longitude
+    id: home_lon
+    min_value: -180
+    max_value: 180
+    step: 0.0001
+    initial_value: 121.5654
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
+          radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
+                             id(home_lon).state, id(radar_range).state,
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
+          if (id(echo_on)) id(echo_refresh).execute();
+          id(wx_last_ms) = 0;   // 座標變了,下一秒重抓天氣
+  - platform: template
+    name: Radar Range
+    id: radar_range
+    min_value: 10
+    max_value: 500
+    step: 5
+    initial_value: 50           # 掃描半徑(km)
+    unit_of_measurement: km
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          if (millis() < 5000) return;
+          // 舊回波的比例/位置已不對,底圖先不疊回波;新圖磚下載完成再重建
+          radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
+                             id(home_lon).state, id(radar_range).state,
+                             id(map_on), false,
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
+          if (id(echo_on)) id(echo_refresh).execute();
+  - platform: template
+    name: Poll Interval
+    id: poll_interval
+    min_value: 10
+    max_value: 300
+    step: 5
+    initial_value: 30           # 抓取間隔(秒);30s=2880次/天(額度4000)
+    unit_of_measurement: s
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+  - platform: template
+    name: Poll Interval Alt
+    id: poll_interval_alt
+    min_value: 5
+    max_value: 300
+    step: 5
+    initial_value: 15           # 免費來源(airplanes.live/adsb.lol)抓取間隔;無每日額度可較密
+    unit_of_measurement: s
+    mode: box
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+# ---- 航班資料抓取(OpenSky OAuth2)----
+http_request:
+  timeout: 20s
+  verify_ssl: false
+  watchdog_timeout: 30s    # 請求期間放寬看門狗,避免 TLS 慢時重啟
+  buffer_size_rx: 8192
+  buffer_size_tx: 8192     # OpenSky 的 JWT token 有 2~3KB,預設 512B 塞不下
+
+globals:
+  - { id: os_token,     type: std::string }
+  - { id: os_token_exp, type: uint32_t, initial_value: '0' }   # millis秒
+  - { id: ac_lat, type: 'std::vector<float>' }
+  - { id: ac_lon, type: 'std::vector<float>' }
+  - { id: ac_trk, type: 'std::vector<float>' }   # 航向(度)
+  - { id: ac_vel, type: 'std::vector<float>' }   # 地速(m/s)
+  - { id: ac_alt, type: 'std::vector<float>' }   # 高度(m)
+  - { id: ac_cs,  type: 'std::vector<std::string>' }
+  - { id: ac_vr,  type: 'std::vector<float>' }   # 垂直速率(m/s)
+  - { id: ac_lc,  type: 'std::vector<uint32_t>' } # last_contact(epoch秒),ATC 訊號延遲判斷
+  - { id: slot_map, type: 'std::vector<int>' }   # 標記槽 -> 航班索引
+  - { id: sel_cs_g, type: std::string }          # 選取中的呼號
+  - { id: fetch_ms,    type: uint32_t, initial_value: '0' }
+  - { id: poll_tick,   type: int,      initial_value: '0' }
+  - { id: sweep_angle, type: float,    initial_value: '0' }
+  - { id: slot_angle, type: 'std::vector<float>' }   # 各槽方位角(度,-1=隱藏)
+  - { id: slot_glow,  type: 'std::vector<float>' }   # 各槽掃描高亮 0~1
+  - id: map_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: echo_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - { id: info_on, type: bool, initial_value: 'false' }   # i 鈕:右下面板顯示系統資訊
+  - id: atc_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # 三指下滑截圖手勢狀態
+  - { id: shot_armed, type: bool,     initial_value: 'false' }
+  - { id: shot_y0,    type: float,    initial_value: '0' }
+  - { id: shot_ms,    type: uint32_t, initial_value: '0' }
+  - { id: sys_tab, type: int, initial_value: '0' }   # SYS 面板分頁:0=SYSTEM 1=ATC CONF
+  - id: poll_when_off
+    type: bool
+    restore_value: true
+    initial_value: 'false'    # 背光關閉時仍持續抓取(設定頁勾選)
+  - id: data_src
+    type: int
+    restore_value: true
+    initial_value: '0'        # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)
+  # ATC 圖層開關(右下面板設定,各自存 NVS)
+  - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
+  - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
+  - { id: atc_apt_on, type: bool, restore_value: true, initial_value: 'true' }   # 機場
+  - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
+  - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
+  - { id: tz_sel, type: int, restore_value: true, initial_value: '0' }             # 時區下拉選擇(index，對齊 tz_posix)
+  - { id: units_imperial, type: bool, restore_value: true, initial_value: 'false' } # 顯示單位:false=公制(°C/km/h/km/m)，true=英制(°F/mph/mi/ft)
+  # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
+  - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
+  - { id: trail_lon, type: 'std::vector<float>' }
+  - { id: trail_cs,  type: 'std::vector<std::string>' }   # 各軌跡槽目前記錄的呼號(換機時作廢舊歷史)
+  - { id: conflict_slot, type: 'std::vector<uint8_t>' }   # 各槽是否觸發 STCA 衝突告警
+  - { id: lbl_side, type: 'std::vector<uint8_t>' }        # 各槽標籤位置 0=右 1=左(避開向量線)
+  - { id: al0, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al1, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al2, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al3, type: uint32_t, restore_value: true, initial_value: '0' }
+  - { id: al_edit, type: int, initial_value: '0' }   # 目前編輯中的鬧鐘 index
+  - { id: alarm_ringing, type: bool, initial_value: 'false' }
+  - { id: snooze_at, type: uint32_t, initial_value: '0' }   # >0=貪睡中,到期 epoch 秒
+  - { id: ring_last_ms, type: uint32_t, initial_value: '0' }   # 上次向喇叭發聲的 millis
+  - { id: wake_ms,   type: uint32_t, initial_value: '0' }
+  - { id: kb_target, type: int,      initial_value: '0' }   # 0=lat 1=lon 2=rng
+  - { id: wx_last_ms, type: uint32_t, initial_value: '0' }  # 上次抓天氣的 millis,0=立即抓
+  - { id: spk_ids, type: 'std::vector<std::string>' }       # SCAN 到的喇叭 entity id(與下拉選單同序)
+  - { id: ring_spk, type: std::string }                      # 響鈴中鬧鐘解析出的喇叭(貪睡重響沿用)
+
+script:
+  - id: fetch_flights            # 丟給 core 1 背景 task,UI 不阻塞
+    mode: single
+    then:
+      - lambda: |-
+          radar_bg::request_states(id(opensky_client_id).state,
+                                   id(opensky_client_secret).state,
+                                   id(home_lat).state, id(home_lon).state,
+                                   id(radar_range).state, id(data_src));
+
+  - id: select_slot
+    parameters:
+      slot: int
+    then:
+      - lambda: |-
+          if (slot < 0 || slot >= (int) id(slot_map).size()) return;
+          int i = id(slot_map)[slot];
+          if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          if (id(info_on)) {   // 點選飛機 → 退出系統資訊顯示
+            id(info_on) = false;
+            lv_obj_clear_state((lv_obj_t *) id(info_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(info_btn_l), lv_color_hex(0x00C060), 0);
+          }
+          if (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g)) {
+            // 再點一次同一台 → 取消選取,右下角換回天氣
+            id(sel_cs_g).clear();
+            id(show_weather).execute();
+            return;
+          }
+          id(sel_cs_g) = id(ac_cs)[i];
+          lv_label_set_text(id(sel_cs_l), id(ac_cs)[i].c_str());
+          lv_label_set_text(id(sel_route_l), "ROUTE ...");
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          float e = (id(ac_lon)[i] - lon0) * 111.320f * coslat;
+          float no = (id(ac_lat)[i] - lat0) * 110.574f;
+          float brg = atan2f(e, no) * 57.29578f;
+          if (brg < 0) brg += 360.0f;
+          char b[48];
+          snprintf(b, sizeof(b), id(units_imperial) ? "ALT %5.0f ft    FL%03.0f" : "ALT %5.0f m     FL%03.0f",
+                   id(ac_alt)[i] * (id(units_imperial) ? 3.2808f : 1.0f), id(ac_alt)[i] * 0.032808f);
+          lv_label_set_text(id(sel_l1), b);
+          snprintf(b, sizeof(b), id(units_imperial) ? "SPD %5.0f mph   %03.0f kt" : "SPD %5.0f km/h  %03.0f kt",
+                   id(ac_vel)[i] * (id(units_imperial) ? 2.2369f : 3.6f), id(ac_vel)[i] * 1.9438f);
+          lv_label_set_text(id(sel_l2), b);
+          snprintf(b, sizeof(b), "VS   %+02.1f m/s   TRK %03.0f",  id(ac_vr)[i], id(ac_trk)[i]);
+          lv_label_set_text(id(sel_l3), b);
+          snprintf(b, sizeof(b), id(units_imperial) ? "DIST %4.0f mi    BRG %03.0f" : "DIST %4.0f km    BRG %03.0f",
+                   sqrtf(e * e + no * no) * (id(units_imperial) ? 0.6214f : 1.0f), brg);
+          lv_label_set_text(id(sel_l4), b);
+      - script.execute: fetch_route
+      - script.execute: atc_panel_sync   # 選機→藏圖層面板;取消選取→ATC 模式下重新顯示
+
+  - id: show_sysinfo           # i 鈕開啟時,右下角面板顯示系統資訊(每秒刷新)
+    mode: single
+    then:
+      - lambda: |-
+          radar_show_sysinfo(id(sel_cs_l), id(sel_route_l), id(sel_l1), id(sel_l2),
+                             id(sel_l3), id(sel_l4),
+                             (int) wifi::global_wifi_component->wifi_rssi());
+
+  - id: show_weather           # 無選取航班時,右下角面板顯示在地天氣(Open-Meteo)
+    mode: single
+    then:
+      - lambda: |-
+          if (id(info_on)) return;   // 系統資訊顯示中,不覆蓋
+          lv_label_set_text(id(sel_cs_l), "LOCAL WX");
+          lv_label_set_text(id(sel_route_l), "TAP AIRCRAFT TO TRACK");
+          if (!radar_bg::g_wx_valid) {
+            lv_label_set_text(id(sel_l1), "WAITING FOR DATA ...");
+            lv_label_set_text(id(sel_l2), "");
+            lv_label_set_text(id(sel_l3), "");
+            lv_label_set_text(id(sel_l4), "");
+            return;
+          }
+          static const char *PTS[16] = { "N","NNE","NE","ENE","E","ESE","SE","SSE",
+                                         "S","SSW","SW","WSW","W","WNW","NW","NNW" };
+          char b[48];
+          snprintf(b, sizeof(b), id(units_imperial) ? "TEMP %6.1f F" : "TEMP %6.1f C",
+                   id(units_imperial) ? radar_bg::g_wx.temp * 1.8f + 32.0f : radar_bg::g_wx.temp);
+          lv_label_set_text(id(sel_l1), b);
+          snprintf(b, sizeof(b), "HUM  %6.0f %%", radar_bg::g_wx.hum);
+          lv_label_set_text(id(sel_l2), b);
+          snprintf(b, sizeof(b), id(units_imperial) ? "WIND %6.1f mph" : "WIND %6.1f km/h",
+                   radar_bg::g_wx.wspd * (id(units_imperial) ? 0.6214f : 1.0f));
+          lv_label_set_text(id(sel_l3), b);
+          float wd = radar_bg::g_wx.wdir;
+          if (wd < 0) wd = 0;
+          int pi = ((int) ((wd + 11.25f) / 22.5f)) % 16;
+          snprintf(b, sizeof(b), "DIR  %6.0f  %s", wd, PTS[pi]);
+          lv_label_set_text(id(sel_l4), b);
+
+  - id: fetch_route            # adsbdb.com 查起訖機場(背景執行)
+    mode: single
+    then:
+      - lambda: 'radar_bg::request_route(id(sel_cs_g));'
+
+  - id: take_screenshot        # 三指下滑:快照 framebuffer → :8081/screenshot.bmp,發 HA 事件觸發下載
+    mode: single
+    then:
+      - lambda: |-
+          if (screenshot_capture(id(main_display)))
+            lv_label_set_text(id(status_label), "SCREENSHOT -> :8081/screenshot.bmp");
+          else
+            lv_label_set_text(id(status_label), "SCREENSHOT FAILED");
+      - homeassistant.event:
+          event: esphome.flight_radar_screenshot
+
+  - id: atc_panel_sync         # 右下面板同步:ATC 圖層面板、SYS 分頁列、亮度滑桿
+    mode: single
+    then:
+      - lambda: |-
+          // 圖層設定只在 SYS 的 ATC CONF 分頁;閒置畫面一律天氣/航班(原始行為)
+          bool tab_mode = id(info_on);
+          bool show = tab_mode && id(sys_tab) == 1;
+          if (show) lv_obj_clear_flag(id(atc_panel), LV_OBJ_FLAG_HIDDEN);
+          else      lv_obj_add_flag(id(atc_panel), LV_OBJ_FLAG_HIDDEN);
+          // 分頁列與分頁鈕高亮(amber 航管配色)
+          if (tab_mode) {
+            lv_obj_clear_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
+            bool t1 = id(sys_tab) == 1;
+            lv_obj_set_style_bg_color((lv_obj_t *) id(tab_sys_btn), lv_color_hex(t1 ? 0x040C08 : 0xE8A020), 0);
+            lv_obj_set_style_text_color(id(tab_sys_l), lv_color_hex(t1 ? 0xE8A020 : 0x201200), 0);
+            lv_obj_set_style_bg_color((lv_obj_t *) id(tab_atc_btn), lv_color_hex(t1 ? 0xE8A020 : 0x040C08), 0);
+            lv_obj_set_style_text_color(id(tab_atc_l), lv_color_hex(t1 ? 0x201200 : 0xE8A020), 0);
+          } else {
+            lv_obj_add_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
+          }
+      - if:
+          condition:
+            lambda: 'return id(info_on);'
+          then:
+            - lvgl.widget.show: bl_slider
+            - lvgl.widget.show: brt_l
+          else:
+            - lvgl.widget.hide: bl_slider
+            - lvgl.widget.hide: brt_l
+
+  - id: echo_refresh           # 回波:背景查最新圖層資訊
+    mode: single
+    then:
+      - lambda: |-
+          radar_bg::request_echo(id(home_lat).state, id(home_lon).state,
+                                 id(radar_range).state);
+
+  - id: rebuild_base           # 底圖重建:快取的底色+輪廓 → 預混合回波 → 距離環/十字線
+    mode: single
+    then:
+      - lambda: |-
+          radar_rebuild_base((lv_obj_t *) id(base_canvas), id(home_lat).state,
+                             id(home_lon).state, id(radar_range).state,
+                             id(map_on), id(echo_on),
+                             atc_layer_mask(id(atc_on), id(atc_asp_on), id(atc_rwy_on), id(atc_apt_on), id(atc_fix_on)));
+
+  - id: start_alarm            # 開始響鈴:亮背光、顯示面板、發聲
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = true;
+          if (!id(backlight).current_values.is_on()) {
+            auto c = id(backlight).turn_on(); c.perform();
+          }
+          lv_obj_clear_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - lambda: 'id(ring_last_ms) = millis();'
+      - lvgl.page.show: main_page
+      - script.execute: fire_alarm
+
+  - id: stop_alarm             # 關閉鬧鐘:停聲、收面板、清貪睡
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = false;
+          id(snooze_at) = 0;
+          lv_obj_add_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - homeassistant.action:
+          action: media_player.media_stop
+          data:
+            entity_id: !lambda 'return id(ring_spk).empty() ? id(alarm_speaker).state : id(ring_spk);'
+
+  - id: snooze_alarm           # 貪睡:停聲、收面板、9 分鐘後再響
+    mode: single
+    then:
+      - lambda: |-
+          id(alarm_ringing) = false;
+          auto t = id(rtc_time).now();
+          if (t.is_valid()) id(snooze_at) = (uint32_t) t.timestamp + 540;   // 9 分鐘
+          lv_obj_add_flag((lv_obj_t *) id(alarm_overlay), LV_OBJ_FLAG_HIDDEN);
+      - homeassistant.action:
+          action: media_player.media_stop
+          data:
+            entity_id: !lambda 'return id(ring_spk).empty() ? id(alarm_speaker).state : id(ring_spk);'
+
+  - id: fire_alarm             # 觸發 HA 喇叭播放(需在 HA 裝置頁允許執行動作)
+    mode: single
+    then:
+      - homeassistant.action:
+          action: media_player.play_media
+          data:
+            entity_id: !lambda 'return id(ring_spk).empty() ? id(alarm_speaker).state : id(ring_spk);'
+            media_content_id: !lambda 'return id(alarm_media).state;'
+            media_content_type: music
+
+  - id: alarm_refresh          # 依 globals 重繪鬧鐘頁所有欄位
+    mode: single
+    then:
+      - lambda: |-
+          uint32_t A[4] = { id(al0), id(al1), id(al2), id(al3) };
+          lv_obj_t *en[4]  = { id(a0_en), id(a1_en), id(a2_en), id(a3_en) };
+          lv_obj_t *enl[4] = { id(a0_enl), id(a1_enl), id(a2_enl), id(a3_enl) };
+          lv_obj_t *tl[4]  = { id(a0_tl), id(a1_tl), id(a2_tl), id(a3_tl) };
+          lv_obj_t *wd[4][7] = {
+            { id(a0d0),id(a0d1),id(a0d2),id(a0d3),id(a0d4),id(a0d5),id(a0d6) },
+            { id(a1d0),id(a1d1),id(a1d2),id(a1d3),id(a1d4),id(a1d5),id(a1d6) },
+            { id(a2d0),id(a2d1),id(a2d2),id(a2d3),id(a2d4),id(a2d5),id(a2d6) },
+            { id(a3d0),id(a3d1),id(a3d2),id(a3d3),id(a3d4),id(a3d5),id(a3d6) } };
+          for (int i = 0; i < 4; i++) {
+            bool e = alarmpk::en(A[i]);
+            if (e) lv_obj_add_state(en[i], LV_STATE_CHECKED);
+            else   lv_obj_clear_state(en[i], LV_STATE_CHECKED);
+            lv_label_set_text(enl[i], e ? "ON" : "OFF");
+            lv_obj_set_style_text_color(enl[i], lv_color_hex(e ? 0x04180C : 0x6E8273), 0);
+            char b[8];
+            snprintf(b, sizeof(b), "%02d:%02d", alarmpk::hh(A[i]), alarmpk::mm(A[i]));
+            lv_label_set_text(tl[i], b);
+            for (int k = 0; k < 7; k++) {
+              bool on = alarmpk::day_on(A[i], k);
+              if (on) lv_obj_add_state(wd[i][k], LV_STATE_CHECKED);
+              else    lv_obj_clear_state(wd[i][k], LV_STATE_CHECKED);
+            }
+          }
+
+  - id: spk_dd_refresh         # 各喇叭下拉選單顯示其目標(鬧鐘 1-4 專屬/預設)目前指派的喇叭
+    mode: single
+    then:
+      - lambda: |-
+          // 注意:dropdown 的 id() 是 LvDropdownType*(compound),不可硬轉 lv_obj_t*
+          LvDropdownType *dd[5] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd) };
+          esphome::text::Text *t[5] = { id(al_spk0), id(al_spk1), id(al_spk2),
+                                        id(al_spk3), id(alarm_speaker) };
+          for (int k = 0; k < 5; k++) {
+            std::string cur = t[k]->state;
+            for (size_t j = 0; j < id(spk_ids).size(); j++)
+              if (id(spk_ids)[j] == cur) {
+                dd[k]->set_selected_index(j, LV_ANIM_OFF);
+                break;
+              }
+          }
+
+  - id: spk_scan               # 掃描 HA 的 media_player 清單 → 背景抓,結果填入 5 個下拉選單
+    mode: single
+    then:
+      - lambda: |-
+          LvDropdownType *dd[5] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd) };
+          if (id(ha_token).state.empty()) {
+            for (auto *d : dd) d->set_options({"SET HA TOKEN FIRST"});
+            return;
+          }
+          std::string url = id(ha_url).state;
+          if (url.empty()) url = "http://homeassistant.local:8123";
+          id(spk_ids).clear();
+          for (auto *d : dd) d->set_options({"SCANNING ..."});
+          radar_bg::request_speakers(url, id(ha_token).state);
+
+  - id: tp_open                # 開啟時間選擇覆蓋層,捲輪定位到 al_edit 那組的時分
+    mode: single
+    then:
+      - lambda: |-
+          uint32_t A[4] = { id(al0), id(al1), id(al2), id(al3) };
+          int i = id(al_edit);
+          char b[12];
+          snprintf(b, sizeof(b), "ALARM %d", i + 1);
+          lv_label_set_text(id(tp_title), b);
+          // 注意:roller 的 id() 是 LvRollerType*(compound),不可硬轉 lv_obj_t*
+          id(tp_hr)->set_selected_index(alarmpk::hh(A[i]), LV_ANIM_OFF);
+          id(tp_mr)->set_selected_index(alarmpk::mm(A[i]), LV_ANIM_OFF);
+          lv_obj_clear_flag((lv_obj_t *) id(tp_overlay), LV_OBJ_FLAG_HIDDEN);
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal
+    update_interval: 60s
+  - platform: uptime
+    name: Uptime
+
+button:
+  - platform: restart
+    name: Restart
+
+interval:
+  # 抓取節拍器:每秒 +1,到達 Poll Interval 且條件允許就抓一次
+  - interval: 1s
+    then:
+      - lambda: |-
+          // i 鈕開啟中 → 每秒刷新系統資訊(RAM/PSRAM/運行時間會變)
+          if (id(info_on)) id(show_sysinfo).execute();
+          // 響鈴中 → 每 15 秒重播一次,直到使用者按 DISMISS
+          if (id(alarm_ringing) && (millis() - id(ring_last_ms)) >= 15000) {
+            id(ring_last_ms) = millis();
+            id(fire_alarm).execute();
+          }
+          // 貪睡到期 → 重新響
+          if (id(snooze_at) > 0 && !id(alarm_ringing)) {
+            auto t = id(rtc_time).now();
+            if (t.is_valid() && (uint32_t) t.timestamp >= id(snooze_at)) {
+              id(snooze_at) = 0;
+              id(start_alarm).execute();
+            }
+          }
+          id(poll_tick) += 1;
+          bool creds = !id(opensky_client_id).state.empty() &&
+                       !id(opensky_client_secret).state.empty();
+          if (id(data_src) == 0 && !creds) {   // 免費來源不需憑證,擋門只對 OpenSky
+            lv_label_set_text(id(status_label), "SET OPENSKY CREDENTIALS");
+            return;
+          }
+          // OpenSky 失敗冷卻中(bg task 走免費來源)→ 節奏也切到免費來源的間隔
+          bool cooling = (millis() / 1000) < radar_bg::g_os_cooldown_until;
+          int itv = (id(data_src) != 0 || cooling) ? (int) id(poll_interval_alt).state
+                                                   : (int) id(poll_interval).state;
+          if (id(poll_tick) >= itv) {
+            if (wifi::global_wifi_component->is_connected() &&
+                (id(backlight).current_values.is_on() || id(poll_when_off))) {   // 背光關=暫停抓取(可設定例外)
+              id(poll_tick) = 0;
+              id(fetch_flights).execute();
+            }
+          }
+      # 收背景 task 的結果(非阻塞)
+      - lambda: |-
+          if (radar_bg::g_auth_fail) {
+            radar_bg::g_auth_fail = false;
+            lv_label_set_text(id(status_label), "OPENSKY AUTH FAIL - USING FALLBACK");
+          }
+          static bool echo_init = false;
+          if (!echo_init && id(echo_on) && millis() > 8000 &&
+              wifi::global_wifi_component->is_connected()) {
+            echo_init = true;
+            id(echo_refresh).execute();
+          }
+          if (radar_bg::g_echo_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_echo_ready = false;
+            xSemaphoreGive(radar_bg::mtx());
+            if (id(echo_on))
+              id(rebuild_base).execute();   // 新幀預混合進底圖,一次算完
+          }
+          if (radar_bg::g_route_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_route_ready = false;
+            if (!id(info_on))
+              lv_label_set_text(id(sel_route_l), radar_bg::g_route.c_str());
+            xSemaphoreGive(radar_bg::mtx());
+          }
+          // 在地天氣:開機 8 秒後首抓,之後每 10 分鐘;座標變更時 wx_last_ms 歸零強制重抓
+          if (millis() > 8000 && wifi::global_wifi_component->is_connected() &&
+              (id(wx_last_ms) == 0 || millis() - id(wx_last_ms) > 600000)) {
+            id(wx_last_ms) = millis();
+            radar_bg::request_weather(id(home_lat).state, id(home_lon).state);
+          }
+          if (radar_bg::g_wx_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_wx_ready = false;
+            xSemaphoreGive(radar_bg::mtx());
+            if (id(sel_cs_g).empty())
+              id(show_weather).execute();
+          }
+          // 喇叭掃描結果 → 填入鬧鐘頁 5 個下拉選單(1-4 專屬 + DEF 預設)
+          if (radar_bg::g_speakers_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_speakers_ready = false;
+            std::string raw = radar_bg::g_speakers;
+            int st2 = radar_bg::g_spk_status;
+            xSemaphoreGive(radar_bg::mtx());
+            // 注意:dropdown 的 id() 是 LvDropdownType*(compound),不可硬轉 lv_obj_t*
+            LvDropdownType *dd[5] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd) };
+            id(spk_ids).clear();
+            if (st2 == 401 || st2 == 403) {
+              for (auto *d : dd) d->set_options({"TOKEN INVALID"});
+            } else if (st2 != 200) {
+              for (auto *d : dd) d->set_options({"HA UNREACHABLE"});
+            } else {
+              std::vector<std::string> names;
+              size_t pos = 0;
+              while (pos < raw.size()) {
+                size_t nl = raw.find('\n', pos);
+                if (nl == std::string::npos) nl = raw.size();
+                std::string line = raw.substr(pos, nl - pos);
+                pos = nl + 1;
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                size_t bar = line.find('|');
+                if (bar == std::string::npos || bar == 0) continue;
+                id(spk_ids).push_back(line.substr(0, bar));
+                names.push_back(line.substr(bar + 1));
+              }
+              if (id(spk_ids).empty()) {
+                for (auto *d : dd) d->set_options({"NO SPEAKERS FOUND"});
+              } else {
+                for (auto *d : dd) d->set_options(names);
+                id(spk_dd_refresh).execute();   // 各選單同步顯示目前指派的喇叭
+              }
+            }
+          }
+          if (!radar_bg::g_states_ready) return;
+          xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+          int n = radar_bg::g_result.size();
+          // ATC 軌跡尾跡:資料被覆寫前,依呼號比對舊位置,推入 trail 歷史(0=最新,2=最舊)
+          if (id(trail_lat).size() != 30) id(trail_lat).assign(30, NAN);
+          if (id(trail_lon).size() != 30) id(trail_lon).assign(30, NAN);
+          if (id(trail_cs).size() != 10) id(trail_cs).assign(10, "");
+          {
+            int lim = n < 10 ? n : 10;
+            for (int j = 0; j < lim; j++) {
+              const std::string &cs = radar_bg::g_result[j].cs;
+              int base = j * 3;
+              if (id(trail_cs)[j] != cs) {   // 這格換機了:舊歷史屬於前任,全部作廢
+                id(trail_cs)[j] = cs;
+                for (int k = 0; k < 3; k++) { id(trail_lat)[base + k] = NAN; id(trail_lon)[base + k] = NAN; }
+              }
+              int oi = -1;
+              for (int k = 0; k < (int) id(ac_cs).size(); k++)
+                if (id(ac_cs)[k] == cs) { oi = k; break; }
+              if (oi < 0) continue;   // 新出現的機,還沒有歷史
+              id(trail_lat)[base + 2] = id(trail_lat)[base + 1];
+              id(trail_lon)[base + 2] = id(trail_lon)[base + 1];
+              id(trail_lat)[base + 1] = id(trail_lat)[base];
+              id(trail_lon)[base + 1] = id(trail_lon)[base];
+              id(trail_lat)[base] = id(ac_lat)[oi];
+              id(trail_lon)[base] = id(ac_lon)[oi];
+            }
+          }
+          id(ac_lat).clear(); id(ac_lon).clear(); id(ac_trk).clear();
+          id(ac_vel).clear(); id(ac_alt).clear(); id(ac_cs).clear(); id(ac_vr).clear();
+          id(ac_lc).clear();
+          for (auto &ac : radar_bg::g_result) {
+            id(ac_lat).push_back(ac.lat); id(ac_lon).push_back(ac.lon);
+            id(ac_trk).push_back(ac.trk); id(ac_vel).push_back(ac.vel);
+            id(ac_alt).push_back(ac.alt); id(ac_cs).push_back(ac.cs);
+            id(ac_vr).push_back(ac.vr); id(ac_lc).push_back(ac.lc);
+          }
+          radar_bg::g_states_ready = false;
+          xSemaphoreGive(radar_bg::mtx());
+          id(fetch_ms) = millis();
+          // 選取中航班的詳情刷新(系統資訊顯示中則不覆蓋)
+          if (!id(sel_cs_g).empty() && !id(info_on)) {
+            int si = -1;
+            for (int i = 0; i < n; i++)
+              if (id(ac_cs)[i] == id(sel_cs_g)) { si = i; break; }
+            char b2[48];
+            if (si >= 0) {
+              float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+              float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+              float e2 = (id(ac_lon)[si] - lon0) * 111.320f * coslat;
+              float n2 = (id(ac_lat)[si] - lat0) * 110.574f;
+              float brg = atan2f(e2, n2) * 57.29578f;
+              if (brg < 0) brg += 360.0f;
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "ALT %5.0f ft    FL %03.0f" : "ALT %5.0f m     FL %03.0f",
+                       id(ac_alt)[si] * (id(units_imperial) ? 3.2808f : 1.0f), id(ac_alt)[si] * 0.032808f);
+              lv_label_set_text(id(sel_l1), b2);
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "SPD %5.0f mph   %3.0f kt" : "SPD %5.0f km/h  %3.0f kt",
+                       id(ac_vel)[si] * (id(units_imperial) ? 2.2369f : 3.6f), id(ac_vel)[si] * 1.9438f);
+              lv_label_set_text(id(sel_l2), b2);
+              snprintf(b2, sizeof(b2), "VS   %+02.1f m/s   TRK %03.0f",
+                       id(ac_vr)[si], id(ac_trk)[si]);
+              lv_label_set_text(id(sel_l3), b2);
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "DIST %4.0f mi    BRG %03.0f" : "DIST %4.0f km    BRG %03.0f",
+                       sqrtf(e2 * e2 + n2 * n2) * (id(units_imperial) ? 0.6214f : 1.0f), brg);
+              lv_label_set_text(id(sel_l4), b2);
+            } else {
+              lv_label_set_text(id(sel_l1), "(out of range)");
+              lv_label_set_text(id(sel_l2), "");
+              lv_label_set_text(id(sel_l3), "");
+              lv_label_set_text(id(sel_l4), "");
+            }
+          }
+          char b[64];
+          // 免費來源(手選或 OpenSky fallback)時在狀態列標示資料出處
+          const char *stag = radar_bg::g_last_src == 1 ? "  [A.LIVE]"
+                           : radar_bg::g_last_src == 2 ? "  [ADSB.LOL]" : "";
+          auto t = id(rtc_time).now();
+          if (t.is_valid())
+            snprintf(b, sizeof(b), "AC:%d   UPD %02d:%02d:%02d%s", n, t.hour, t.minute, t.second, stag);
+          else
+            snprintf(b, sizeof(b), "AC:%d%s", n, stag);
+          lv_label_set_text(id(status_label), b);
+          static bool first_data = true;
+          if (first_data) {
+            first_data = false;
+            if (id(sel_cs_g).empty())
+              id(show_weather).execute();   // 未選機:面板顯示在地天氣
+          }
+      # 航班點外插移動(每秒,依航向+地速推算目前位置)
+      - lambda: |-
+          lv_obj_t *marks[10] = { id(ac0), id(ac1), id(ac2), id(ac3), id(ac4),
+                                  id(ac5), id(ac6), id(ac7), id(ac8), id(ac9) };
+          lv_obj_t *imgs[10] = { (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1),
+                                 (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3),
+                                 (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5),
+                                 (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
+                                 (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9) };
+          lv_obj_t *dbs[10] = { id(ad0), id(ad1), id(ad2), id(ad3), id(ad4),
+                                id(ad5), id(ad6), id(ad7), id(ad8), id(ad9) };
+          lv_obj_t *sqs[10] = { id(sq0), id(sq1), id(sq2), id(sq3), id(sq4),
+                                id(sq5), id(sq6), id(sq7), id(sq8), id(sq9) };
+          lv_obj_t *vecs[10] = { id(vec0)->obj, id(vec1)->obj, id(vec2)->obj, id(vec3)->obj, id(vec4)->obj, id(vec5)->obj, id(vec6)->obj, id(vec7)->obj, id(vec8)->obj, id(vec9)->obj };
+          lv_obj_t *trs[10][6] = {
+            { id(tr0_0), id(tr0_1), id(tr0_2), id(tr0_3), id(tr0_4), id(tr0_5) },
+            { id(tr1_0), id(tr1_1), id(tr1_2), id(tr1_3), id(tr1_4), id(tr1_5) },
+            { id(tr2_0), id(tr2_1), id(tr2_2), id(tr2_3), id(tr2_4), id(tr2_5) },
+            { id(tr3_0), id(tr3_1), id(tr3_2), id(tr3_3), id(tr3_4), id(tr3_5) },
+            { id(tr4_0), id(tr4_1), id(tr4_2), id(tr4_3), id(tr4_4), id(tr4_5) },
+            { id(tr5_0), id(tr5_1), id(tr5_2), id(tr5_3), id(tr5_4), id(tr5_5) },
+            { id(tr6_0), id(tr6_1), id(tr6_2), id(tr6_3), id(tr6_4), id(tr6_5) },
+            { id(tr7_0), id(tr7_1), id(tr7_2), id(tr7_3), id(tr7_4), id(tr7_5) },
+            { id(tr8_0), id(tr8_1), id(tr8_2), id(tr8_3), id(tr8_4), id(tr8_5) },
+            { id(tr9_0), id(tr9_1), id(tr9_2), id(tr9_3), id(tr9_4), id(tr9_5) },
+          };
+          bool atc = id(atc_on);
+          if (id(slot_map).size() != 10) id(slot_map).assign(10, -1);
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float rng = id(radar_range).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
+          if (dt > 180.0f) dt = 180.0f;   // 資料太舊就不再外插
+          int n = id(ac_lat).size(), shown = 0;
+          float earr[10], noarr[10];
+          bool selarr[10];
+          for (int i = 0; i < n && shown < 10; i++) {
+            float rad = id(ac_trk)[i] * 3.14159265f / 180.0f;
+            float vkm = id(ac_vel)[i] * dt / 1000.0f;
+            float e  = (id(ac_lon)[i] - lon0) * 111.320f * coslat + vkm * sinf(rad);
+            float no = (id(ac_lat)[i] - lat0) * 110.574f          + vkm * cosf(rad);
+            if (e * e + no * no > rng * rng) continue;
+            int px = RS(240) + (int) (e / rng * (float) RADAR_R);
+            int py = RS(240) - (int) (no / rng * (float) RADAR_R);
+            // 標籤避讓:ATC 模式且向量線朝右(航向 0~180)時,標籤翻到符號左側
+            if (id(lbl_side).size() != 10) id(lbl_side).assign(10, 0);
+            bool lside = atc && sinf(rad) > 0.0f;
+            if ((uint8_t) lside != id(lbl_side)[shown]) {
+              id(lbl_side)[shown] = lside ? 1 : 0;
+              lv_obj_set_pos(imgs[shown], lside ? RS(94) : 0, RS(6));
+              lv_obj_set_pos(sqs[shown], lside ? RS(105) : RS(11), RS(17));
+              if (lside) {
+                lv_obj_set_width(dbs[shown], RS(88));
+                lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_RIGHT, 0);
+                lv_obj_set_pos(dbs[shown], 0, RS(4));
+              } else {
+                lv_obj_set_width(dbs[shown], LV_SIZE_CONTENT);
+                lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_LEFT, 0);
+                lv_obj_set_pos(dbs[shown], RS(32), RS(4));
+              }
+            }
+            // 圖示中心對準位置(左置標籤時符號在容器右側)
+            lv_obj_set_pos(marks[shown], lside ? px - RS(108) : px - RS(14), py - RS(20));
+            lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
+            bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
+            lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
+            lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
+            earr[shown] = e; noarr[shown] = no; selarr[shown] = selg;
+            // 訊號延遲:last_contact 超過 60 秒沒更新
+            bool stale = false;
+            if (id(rtc_time).now().is_valid()) {
+              uint32_t now_epoch = (uint32_t) id(rtc_time).now().timestamp;
+              uint32_t lc = (i < (int) id(ac_lc).size()) ? id(ac_lc)[i] : now_epoch;
+              stale = (now_epoch > lc) && (now_epoch - lc > 60);
+            }
+            if (atc) {
+              lv_obj_add_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
+              uint32_t basecol = selg ? 0xFFFFFF : (stale ? 0xFFCC00 : 0x00FF41);
+              lv_obj_set_style_bg_color(sqs[shown], lv_color_hex(basecol), 0);
+              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(basecol), 0);
+              // 速度向量線:未來 120 秒推算位置,超出雷達圈就沿方向 clamp 回圓周上
+              float vkm2 = id(ac_vel)[i] * 120.0f / 1000.0f;
+              float e2 = e + vkm2 * sinf(rad);
+              float n2 = no + vkm2 * cosf(rad);
+              float d2 = sqrtf(e2 * e2 + n2 * n2);
+              if (d2 > rng) { e2 *= rng / d2; n2 *= rng / d2; }
+              int px2 = RS(240) + (int) (e2 / rng * (float) RADAR_R);
+              int py2 = RS(240) - (int) (n2 / rng * (float) RADAR_R);
+              static lv_point_t vp[10][2];
+              vp[shown][0].x = px;  vp[shown][0].y = py;
+              vp[shown][1].x = px2; vp[shown][1].y = py2;
+              lv_line_set_points(vecs[shown], vp[shown], 2);
+              lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              // 歷史軌跡點線:每段歷史放中點+端點兩顆小圓點(至多 6 顆,漸淡),
+              // 與實線向量做出視覺區隔。trail 依資料索引 i 儲存(0=最新),首個無效點即停
+              {
+                int lx = px, ly = py, k = 0, d = 0;
+                for (; k < 3; k++) {
+                  float tlat = (i < 10) ? id(trail_lat)[i * 3 + k] : NAN;
+                  float tlon = (i < 10) ? id(trail_lon)[i * 3 + k] : NAN;
+                  if (isnan(tlat) || isnan(tlon)) break;
+                  float te = (tlon - lon0) * 111.320f * coslat;
+                  float tn = (tlat - lat0) * 110.574f;
+                  if (te * te + tn * tn > rng * rng) break;
+                  int tx = RS(240) + (int) (te / rng * (float) RADAR_R);
+                  int ty = RS(240) - (int) (tn / rng * (float) RADAR_R);
+                  lv_obj_set_pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
+                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  d++;
+                  lv_obj_set_pos(trs[shown][d], tx - 1, ty - 1);
+                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  d++;
+                  lx = tx; ly = ty;
+                }
+                for (; d < 6; d++) lv_obj_add_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+              }
+            } else {
+              lv_obj_clear_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);   // 還原預設標籤色
+            }
+            char db[48];
+            if (atc) {
+              const char *arrow = (id(ac_vr)[i] > 0.5f) ? "↑" : (id(ac_vr)[i] < -0.5f ? "↓" : "=");
+              snprintf(db, sizeof(db), "%s%s\nFL%03.0f%s%.0fkts", id(ac_cs)[i].c_str(),
+                       stale ? "*" : "", id(ac_alt)[i] * 0.032808f, arrow, id(ac_vel)[i] * 1.9438f);
+              if (id(atc_route_on)) {
+                // 起訖站第三行(例 KHH-KIX):快取未命中會排背景查詢,查到前不顯示
+                std::string rt = radar_bg::route_cache_get(id(ac_cs)[i]);
+                if (!rt.empty() && rt != "-") {
+                  size_t dl = strlen(db);
+                  snprintf(db + dl, sizeof(db) - dl, "\n%s", rt.c_str());
+                }
+              }
+            } else {
+              snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
+                       id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
+            }
+            if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
+              lv_label_set_text(dbs[shown], db);
+            if (id(slot_angle).size() != 10) id(slot_angle).assign(10, -1.0f);
+            if (id(slot_glow).size() != 10) id(slot_glow).assign(10, 0.0f);
+            float bearing = atan2f(e, no) * 57.29578f;   // 0=北,順時針
+            if (bearing < 0) bearing += 360.0f;
+            id(slot_angle)[shown] = bearing;
+            id(slot_map)[shown] = i;
+            lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            shown++;
+          }
+          // STCA:兩兩比對水平距離 < 5.5km 且高度差 < 300m → 衝突告警(紅色,選取中則紅白交替)
+          if (id(conflict_slot).size() != 10) id(conflict_slot).assign(10, 0);
+          for (int a = 0; a < 10; a++) id(conflict_slot)[a] = 0;
+          if (atc) {
+            for (int a = 0; a < shown; a++) {
+              int ia = id(slot_map)[a];
+              for (int b = a + 1; b < shown; b++) {
+                int ib = id(slot_map)[b];
+                float dex = earr[a] - earr[b], dno = noarr[a] - noarr[b];
+                float dist = sqrtf(dex * dex + dno * dno);
+                float dalt = fabsf(id(ac_alt)[ia] - id(ac_alt)[ib]);
+                if (dist < 5.5f && dalt < 300.0f) {
+                  id(conflict_slot)[a] = 1;
+                  id(conflict_slot)[b] = 1;
+                }
+              }
+            }
+            for (int a = 0; a < shown; a++) {
+              if (!id(conflict_slot)[a]) continue;
+              bool blink = (millis() / 1000) % 2 == 0;
+              uint32_t col = (selarr[a] && !blink) ? 0xFFFFFF : 0xFF0033;
+              lv_obj_set_style_bg_color(sqs[a], lv_color_hex(col), 0);
+              lv_obj_set_style_text_color(dbs[a], lv_color_hex(col), 0);
+            }
+          }
+          for (int i = shown; i < 10; i++) {
+            lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
+            for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
+            id(slot_map)[i] = -1;
+            if (id(slot_angle).size() == 10) id(slot_angle)[i] = -1.0f;
+          }
+      # 設定頁:依 LAT/RANGE/POLL 即時估算每日 OpenSky credits 消耗
+      - lambda: |-
+          if (!id(settings_page)->is_showing()) return;
+          if (id(data_src) != 0) {   // 免費來源:無每日額度,只提示範圍與半徑上限
+            lv_label_set_text(id(est_l), id(data_src) == 1
+                ? "AIRPLANES.LIVE: FREE, NO DAILY QUOTA (POLL2 5-300s, RANGE <= 463km)"
+                : "ADSB.LOL: FREE, NO DAILY QUOTA (POLL2 5-300s, RANGE <= 463km)");
+            lv_obj_set_style_text_color(id(est_l), lv_color_hex(0x30C060), 0);
+            return;
+          }
+          float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
+          float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
+          int ps = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll)));
+          if (rg < 10 || rg > 500 || ps < 10 || ps > 300 || la < -85 || la > 85) {
+            lv_label_set_text(id(est_l), "EST: LAT / RANGE 10-500 / POLL 10-300");
+            lv_obj_set_style_text_color(id(est_l), lv_color_hex(0x6E8273), 0);
+            return;
+          }
+          // OpenSky 計費:查詢框面積(平方度)決定每次扣的 credits
+          float coslat = cosf(la * 3.14159265f / 180.0f);
+          float area = (2.0f * rg / 110.574f) * (2.0f * rg / (111.320f * coslat));
+          int cr = area <= 25.0f ? 1 : area <= 100.0f ? 2 : area <= 400.0f ? 3 : 4;
+          int calls = 86400 / ps;
+          int total = calls * cr;
+          char b[96];
+          snprintf(b, sizeof(b), "EST %d fetch/day x %d credit = %d / 4000 daily", calls, cr, total);
+          lv_label_set_text(id(est_l), b);
+          lv_obj_set_style_text_color(id(est_l),
+              lv_color_hex(total > 4000 ? 0xFF5030 : (total > 3200 ? 0xFFB020 : 0x30C060)), 0);
+  # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;6 秒轉一圈,角度用時間基準→不受幀率漂移)
+  - interval: 30ms
+    then:
+      - lambda: |-
+          const float PERIOD = 6000.0f;            // 一圈毫秒數
+          uint32_t now = millis();
+          float prev = id(sweep_angle);
+          float cur = fmodf((float) now / PERIOD * 360.0f, 360.0f);
+          id(sweep_angle) = cur;
+          const float DEG = 3.14159265f / 180.0f;
+          // 掃描線 + 8 條尾巴一起算(共用三角函式基準,減少重複)
+          lv_obj_t *lines[9] = { id(sweep_line)->obj,
+                                 id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj,
+                                 id(tail4)->obj, id(tail5)->obj, id(tail6)->obj, id(tail7)->obj };
+          static lv_point_t lp[9][2];
+          for (int k = 0; k < 9; k++) {
+            float a = (cur - k * 1.0f) * DEG;       // 第0條=掃描線,其後每條退 1°
+            lp[k][0].x = RS(240); lp[k][0].y = RS(240);
+            lp[k][1].x = RS(240) + (lv_coord_t) ((float) RADAR_R * sinf(a));
+            lp[k][1].y = RS(240) - (lv_coord_t) ((float) RADAR_R * cosf(a));
+            lv_line_set_points(lines[k], lp[k], 2);
+          }
+          // 航班點:被掃描線掃過→高亮,之後依時間漸暗(不受幀率影響)
+          if (id(slot_glow).size() != 10) return;
+          lv_obj_t *imgs[10] = { (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1),
+                                 (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3),
+                                 (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5),
+                                 (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
+                                 (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9) };
+          const float DECAY = 0.932f;              // 每幀衰減(30ms,約 0.5s 半衰,同 20fps 時的 0.89)
+          for (int i = 0; i < 10; i++) {
+            float ang = id(slot_angle)[i];
+            if (ang < 0) continue;
+            bool crossed;
+            if (cur >= prev) crossed = (ang > prev && ang <= cur);
+            else             crossed = (ang > prev || ang <= cur);   // 跨 360
+            float g0 = id(slot_glow)[i];
+            float g = crossed ? 1.0f : g0 * DECAY;
+            id(slot_glow)[i] = g;
+            // 已回到基底且上一幀也是基底 → 略過 recolor(省重繪)
+            if (g < 0.02f && g0 < 0.02f) continue;
+            int idx = (i < (int) id(slot_map).size()) ? id(slot_map)[i] : -1;
+            bool selg = (idx >= 0 && !id(sel_cs_g).empty() &&
+                         idx < (int) id(ac_cs).size() && id(ac_cs)[idx] == id(sel_cs_g));
+            uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
+            uint8_t r = br + (uint8_t)((255 - br) * g);
+            uint8_t gg = bg + (uint8_t)((255 - bg) * g);
+            uint8_t b = bb + (uint8_t)((255 - bb) * g);
+            lv_obj_set_style_img_recolor(imgs[i], lv_color_make(r, gg, b), 0);
+          }
+  # 回波每 10 分鐘更新(開啟時)
+  - interval: 600s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(echo_on) && wifi::global_wifi_component->is_connected() &&
+                     (id(backlight).current_values.is_on() || id(poll_when_off));
+          then:
+            - script.execute: echo_refresh
+  # 每 5 秒刷新 WiFi 狀態與座標顯示(只重繪那兩行)
+  - interval: 5s
+    then:
+      - lambda: |-
+          bool up = wifi::global_wifi_component->is_connected();
+          lv_label_set_text(id(wifi_icon), up ? LV_SYMBOL_WIFI : LV_SYMBOL_WARNING);
+          lv_obj_set_style_text_color(id(wifi_icon), lv_color_hex(up ? 0x00E66E : 0xFF7800), 0);
+      - lvgl.label.update:
+          id: coords_label
+          text: !lambda |-
+            char buf[48];
+            snprintf(buf, sizeof(buf), id(units_imperial) ? "%.4fN  %.4fE  R%.0fmi" : "%.4fN  %.4fE  R%.0fkm",
+                     id(home_lat).state, id(home_lon).state, id(radar_range).state * (id(units_imperial) ? 0.6214f : 1.0f));
+            return std::string(buf);
+
+# =====================================================================
+#  Hardware pin map / 硬體腳位定義
+#  Board: generic "esp32-s3-5inch-rgb-001" (ESP32-S3, 16MB flash,
+#  8MB octal PSRAM, 800x480 ST7262 parallel-RGB panel, GT911 touch).
+#  Using a different S3 + 800x480 RGB + GT911 board? Edit the pins and
+#  panel timings below to match your board's schematic - see README
+#  "Compatible boards".
+# =====================================================================
+
+# ---- 字型 ----
+font:
+  - file: "gfonts://Roboto Condensed"
+    id: font_small
+    size: ${f_small}
+    # 喇叭名稱常為中文:繁體=Big5 一級常用字、簡體=GB2312 一級扣重複
+    # (tools/make_cjk_glyphs.py 產生)
+    extras:
+      - file: "gfonts://Noto Sans TC"
+        glyphs:
+          - !include ../cjk_glyphs.yaml
+      - file: "gfonts://Noto Sans SC"
+        glyphs:
+          - !include ../cjk_glyphs_sc.yaml
+  - file: "gfonts://Roboto Condensed"
+    id: font_mid
+    size: ${f_mid}
+  - file: "gfonts://Roboto Condensed@700"
+    id: font_clock
+    size: ${f_clock}
+    glyphs: "0123456789:- ALMR"
+  - file: "gfonts://Roboto Mono"
+    id: font_mono
+    size: ${f_mono}
+  - file: "gfonts://Roboto Condensed"
+    id: font_tiny
+    size: ${f_tiny}
+    # ATC 標籤的爬升/下降箭頭:Roboto Condensed 沒有 U+2191/2193。
+    # ESPHome extras 的 offset_y 用「該字型自己的 ascender」算,行高卻依主字型,
+    # 所以 extras 字型 14px 的 ascender 必須 ≈13 才對得齊基線。
+    # DejaVu Sans:ascender=13(吻合)、箭頭 5px 寬 1bpp 仍有箭頭形;
+    # Noto Sans Symbols ascender=21 → 箭頭整根掉到基線下;gfonts Roboto 缺這兩字。
+    # (字型檔取自 LVGL 內附,Bitstream Vera/DejaVu 授權,可自由散布)
+    extras:
+      - file: "fonts/DejaVuSans.ttf"
+        glyphs: ["↑", "↓"]
+
+image:
+  - file: plane.png
+    id: plane_img
+    type: RGB565
+    transparency: alpha_channel

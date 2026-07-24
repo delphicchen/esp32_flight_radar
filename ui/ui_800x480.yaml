@@ -1,0 +1,3510 @@
+# ---- LVGL UI ----
+lvgl:
+  displays: [main_display]
+  touchscreens: [my_touch]
+  bg_color: 0x040C08
+  disp_bg_color: 0x040C08
+  pages:
+    - id: main_page
+      bg_color: 0x040C08
+      pad_all: 0
+      widgets:
+        # ===== 底圖層(最底層,不透明,常駐)=====
+        # 底色+台灣輪廓+預混合回波+距離環/十字線全部烤在這張;
+        # 混色/畫環在 radar_rebuild_base 一次做完,每幀渲染只剩不透明 blit
+        - canvas:
+            id: base_canvas
+            x: 12
+            y: 12
+            width: 456
+            height: 456
+        # 掃描尾巴(4 條漸暗,程式每幀更新座標)
+        # 掃描尾巴(8 條,間隔 2°,漸暗連成扇形餘暉)
+        - line: { id: tail0, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x008B45, line_width: 5 }
+        - line: { id: tail1, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x007A3C, line_width: 5 }
+        - line: { id: tail2, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x006A34, line_width: 5 }
+        - line: { id: tail3, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00592C, line_width: 5 }
+        - line: { id: tail4, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x004A25, line_width: 5 }
+        - line: { id: tail5, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00391C, line_width: 5 }
+        - line: { id: tail6, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x002814, line_width: 5 }
+        - line: { id: tail7, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00190C, line_width: 5 }
+        # 掃描線(100ms 轉動)
+        - line:
+            id: sweep_line
+            points: ["240, 240", "240, 14"]
+            line_color: 0x00A050
+            line_width: 2
+            opa: 80%
+        # 航班標記 ×10:飛機圖示(依航向旋轉)+ ATC 資料標籤,可點選
+        - obj:
+            id: ac0
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai0
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq0
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad0
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 0
+        - obj:
+            id: ac1
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai1
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq1
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad1
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 1
+        - obj:
+            id: ac2
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai2
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq2
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad2
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 2
+        - obj:
+            id: ac3
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai3
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq3
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad3
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 3
+        - obj:
+            id: ac4
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai4
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq4
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad4
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 4
+        - obj:
+            id: ac5
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai5
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq5
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad5
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 5
+        - obj:
+            id: ac6
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai6
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq6
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad6
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 6
+        - obj:
+            id: ac7
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai7
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq7
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad7
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 7
+        - obj:
+            id: ac8
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai8
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq8
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad8
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 8
+        - obj:
+            id: ac9
+            x: -200
+            y: -200
+            width: 122
+            height: 64
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - image:
+                  id: ai9
+                  x: 0
+                  y: 6
+                  src: plane_img
+              - obj:
+                  id: sq9
+                  x: 11
+                  y: 17
+                  width: 6
+                  height: 6
+                  bg_color: 0x00FF41
+                  bg_opa: COVER
+                  border_width: 0
+                  radius: 0
+                  pad_all: 0
+                  hidden: true
+              - label:
+                  id: ad9
+                  x: 32
+                  y: 4
+                  text: ""
+                  text_font: font_tiny
+                  text_color: 0x9AE6B4
+            on_click:
+              - script.execute:
+                  id: select_slot
+                  slot: 9
+        # ===== ATC 模式:速度向量線 + 歷史軌跡尾跡(平常隱藏,atc_on 時才顯示)=====
+        - line:
+            id: vec0
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec1
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec2
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec3
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec4
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec5
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec6
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec7
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec8
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - line:
+            id: vec9
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00FF41
+            line_width: 1
+            hidden: true
+        - obj:
+            id: tr0_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr0_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr1_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr2_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr3_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr4_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr5_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr6_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr7_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr8_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_0
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 90%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_1
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 80%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_2
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 65%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_3
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 50%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_4
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 40%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        - obj:
+            id: tr9_5
+            x: -20
+            y: -20
+            width: 3
+            height: 3
+            radius: 2
+            bg_color: 0x00E048
+            bg_opa: 30%
+            border_width: 0
+            pad_all: 0
+            hidden: true
+        # 中心點(你的位置)
+        - obj:
+            x: 236
+            y: 236
+            width: 8
+            height: 8
+            radius: 4
+            bg_color: 0x00E66E
+            border_width: 0
+        # NESW
+        - label: { x: 232, y: 18,  text: "N", text_font: font_small, text_color: 0x00E66E }
+        - label: { x: 448, y: 228, text: "E", text_font: font_small, text_color: 0x6E8273 }
+        - label: { x: 234, y: 440, text: "S", text_font: font_small, text_color: 0x6E8273 }
+        - label: { x: 20,  y: 228, text: "W", text_font: font_small, text_color: 0x6E8273 }
+
+        # ===== 分隔線 =====
+        - line:
+            points: ["482, 0", "482, 480"]
+            line_color: 0x006030
+            line_width: 2
+
+        # ===== 右:資訊欄 =====
+        # MAP / ECHO 文字切換鈕(啟用=反白)
+        - button:
+            id: map_btn
+            x: 495
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: map_btn_l
+                  align: CENTER
+                  text: "MAP"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(map_btn), LV_STATE_CHECKED);
+                  id(map_on) = on;
+                  lv_obj_set_style_text_color(id(map_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  id(rebuild_base).execute();
+        - button:
+            id: echo_btn
+            x: 554
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: echo_btn_l
+                  align: CENTER
+                  text: "ECHO"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
+                  id(echo_on) = on;
+                  lv_obj_set_style_text_color(id(echo_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  id(rebuild_base).execute();   // 有舊回波幀就立即疊回顯示
+                  if (on) id(echo_refresh).execute();   // 並排一次新抓取
+        - button:
+            id: pwr_btn
+            x: 672
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: pwr_btn_l
+                  align: CENTER
+                  text: "PWR"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  if (millis() - id(wake_ms) < 1500) {
+                    // 喚醒後防誤觸:把狀態復原成按下
+                    lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+                    return;
+                  }
+                  bool on = lv_obj_has_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+                  lv_obj_set_style_text_color(id(pwr_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  if (on) {
+                    auto call = id(backlight).turn_on();
+                    call.perform();
+                  } else {
+                    auto call = id(backlight).turn_off();
+                    call.perform();
+                  }
+        - label:
+            id: wifi_icon
+            x: 762
+            y: 12
+            text: "\uF1EB"
+            text_font: montserrat_20
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[8];
+                  (void) b;
+                  lv_textarea_set_text((lv_obj_t *) id(ta_ssid),
+                      wifi::global_wifi_component->wifi_ssid().c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_pass), "");
+                  lv_textarea_set_text((lv_obj_t *) id(ta_cid),
+                      id(opensky_client_id).state.c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_sec),
+                      id(opensky_client_secret).state.c_str());
+                  lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_ssid));
+              - lvgl.page.show: config_page
+        - label:
+            id: clock_label
+            align: TOP_MID
+            x: 240
+            y: 16
+            text: "--:--:--"
+            text_font: font_clock
+            text_color: 0x00E66E
+            clickable: true
+            on_click:
+              - lvgl.page.show: alarm_page
+              - script.execute: alarm_refresh
+              - script.execute: spk_dd_refresh
+              - lambda: |-
+                  // 首次進鬧鐘頁且已填 token → 自動掃描喇叭清單
+                  if (id(spk_ids).empty() && !id(ha_token).state.empty())
+                    id(spk_scan).execute();
+        - label:
+            id: coords_label
+            align: TOP_MID
+            x: 240
+            y: 100 #96
+            text: "--.----N  ---.----E"
+            text_font: font_small
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[16];
+                  snprintf(b, sizeof(b), "%.4f", id(home_lat).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_lat), b);
+                  snprintf(b, sizeof(b), "%.4f", id(home_lon).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_lon), b);
+                  snprintf(b, sizeof(b), "%.0f", id(radar_range).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_rng), b);
+                  snprintf(b, sizeof(b), "%.0f", id(poll_interval).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_poll), b);
+                  snprintf(b, sizeof(b), "%.0f", id(poll_interval_alt).state);
+                  lv_textarea_set_text((lv_obj_t *) id(ta_poll2), b);
+                  // SRC 三鈕與 data_src 同步(checked 態 + 文字色)
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int k = 0; k < 3; k++) {
+                    if (k == id(data_src)) lv_obj_add_state(sb[k], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[k], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[k],
+                        lv_color_hex(k == id(data_src) ? 0x04180C : 0x00C060), 0);
+                  }
+                  id(kb_target) = 0;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
+              - lvgl.page.show: settings_page
+        - line:
+            points: ["490, 196", "792, 196"]
+            line_color: 0x003820
+            line_width: 1
+        # 選取航班詳情(點雷達上的飛機後顯示)
+        - label:
+            id: sel_cs_l
+            x: 500
+            y: 212
+            text: "INITIALIZING..."
+            text_font: font_mid
+            text_color: 0x00E66E
+        - label:
+            id: sel_route_l
+            x: 500
+            y: 248
+            text: " "
+            text_font: font_mono
+            text_color: 0xFFD24A
+        - label: { id: sel_l1, x: 500, y: 284, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l2, x: 500, y: 312, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l3, x: 500, y: 340, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        - label: { id: sel_l4, x: 500, y: 368, text: " ", text_font: font_mono, text_color: 0xD2E6D7 }
+        # 底部狀態列
+        - label:
+            id: status_label
+            x: 500
+            y: 446
+            text: "SET OPENSKY CREDENTIALS"
+            text_font: font_mono
+            text_color: 0x6E8273
+            clickable: true
+            on_click:
+              - lambda: |-
+                  char b[8];
+                  (void) b;
+                  lv_textarea_set_text((lv_obj_t *) id(ta_ssid),
+                      wifi::global_wifi_component->wifi_ssid().c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_pass), "");
+                  lv_textarea_set_text((lv_obj_t *) id(ta_cid),
+                      id(opensky_client_id).state.c_str());
+                  lv_textarea_set_text((lv_obj_t *) id(ta_sec),
+                      id(opensky_client_secret).state.c_str());
+                  lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));
+              - lvgl.page.show: config_page
+        # ATC 鈕:切換雷達顯示為 ATC 模式(方塊目標點/速度向量線/歷史軌跡/STCA 衝突告警)
+        - button:
+            id: atc_btn
+            x: 613
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: atc_btn_l
+                  align: CENTER
+                  text: "ATC"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
+                  id(atc_on) = on;
+                  lv_obj_set_style_text_color(id(atc_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+              - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
+              - script.execute: atc_panel_sync
+        # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
+        - button:
+            id: info_btn
+            x: 731
+            y: 154
+            width: 56
+            height: 32
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: info_btn_l
+                  align: CENTER
+                  text: "SYS"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(info_btn), LV_STATE_CHECKED);
+                  id(info_on) = on;
+                  lv_obj_set_style_text_color(id(info_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  if (on) {
+                    id(show_sysinfo).execute();
+                  } else if (id(sel_cs_g).empty()) {
+                    id(show_weather).execute();
+                  } else {
+                    // 恢復選取中航班:標頭先回填,詳情待下輪資料,航線重查
+                    lv_label_set_text(id(sel_cs_l), id(sel_cs_g).c_str());
+                    lv_label_set_text(id(sel_route_l), "ROUTE ...");
+                    lv_label_set_text(id(sel_l1), "");
+                    lv_label_set_text(id(sel_l2), "");
+                    lv_label_set_text(id(sel_l3), "");
+                    lv_label_set_text(id(sel_l4), "");
+                    id(fetch_route).execute();
+                  }
+              - script.execute: atc_panel_sync
+        # 亮度滑桿(僅 SYS 選單顯示,amber 配色):拖動即時調背光,存於 light 的 NVS 狀態
+        - label:
+            id: brt_l
+            x: 500
+            y: 406
+            text: "BRT"
+            text_font: font_small
+            text_color: 0xB07818
+            hidden: true
+        - slider:
+            id: bl_slider
+            hidden: true
+            x: 552
+            y: 410
+            width: 228
+            height: 10
+            min_value: 5
+            max_value: 100
+            value: 100
+            bg_color: 0x241A08
+            bg_opa: COVER
+            radius: 5
+            indicator:
+              bg_color: 0xB07818
+            knob:
+              bg_color: 0xE8A020
+              radius: 8
+              pad_all: 4
+            on_value:
+              - lambda: |-
+                  auto call = id(backlight).turn_on();
+                  call.set_brightness(x / 100.0f);
+                  call.set_transition_length(0);
+                  call.perform();
+
+        # ===== ATC 圖層設定面板(ATC 模式且未選機時取代右下天氣;不透明,直接蓋住底下文字)=====
+        - obj:
+            id: atc_panel
+            x: 490
+            y: 200
+            width: 302
+            height: 200
+            bg_color: 0x040C08
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - button:
+                  id: asp_btn
+                  x: 10
+                  y: 56
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: asp_btn_l, align: CENTER, text: "AIRSPACE", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_asp_on) = lv_obj_has_state((lv_obj_t *) id(asp_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(asp_btn_l),
+                            lv_color_hex(id(atc_asp_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: rwy_btn
+                  x: 154
+                  y: 56
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: rwy_btn_l, align: CENTER, text: "RUNWAY", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_rwy_on) = lv_obj_has_state((lv_obj_t *) id(rwy_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(rwy_btn_l),
+                            lv_color_hex(id(atc_rwy_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: apt_btn
+                  x: 10
+                  y: 112
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: apt_btn_l, align: CENTER, text: "AIRPORT", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_apt_on) = lv_obj_has_state((lv_obj_t *) id(apt_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(apt_btn_l),
+                            lv_color_hex(id(atc_apt_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: fix_btn
+                  x: 154
+                  y: 112
+                  width: 138
+                  height: 44
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: fix_btn_l, align: CENTER, text: "FIXES", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        id(atc_fix_on) = lv_obj_has_state((lv_obj_t *) id(fix_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(fix_btn_l),
+                            lv_color_hex(id(atc_fix_on) ? 0x201200 : 0xE8A020), 0);
+                    - script.execute: rebuild_base
+              - button:
+                  id: route_btn
+                  x: 10
+                  y: 162
+                  width: 282
+                  height: 34
+                  radius: 4
+                  checkable: true
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  checked: { bg_color: 0xE8A020, border_color: 0xE8A020 }
+                  widgets:
+                    - label: { id: route_btn_l, align: CENTER, text: "ROUTE", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: |-
+                        // 標籤起訖站行(逐架背景查 adsbdb 並快取);只動標籤,不需重建底圖
+                        id(atc_route_on) = lv_obj_has_state((lv_obj_t *) id(route_btn), LV_STATE_CHECKED);
+                        lv_obj_set_style_text_color(id(route_btn_l),
+                            lv_color_hex(id(atc_route_on) ? 0x201200 : 0xE8A020), 0);
+
+        # ===== SYS 面板分頁列(SYS 開啟時顯示;蓋住底下的標題列)=====
+        - obj:
+            id: sys_tabbar
+            x: 490
+            y: 198
+            width: 302
+            height: 40
+            bg_color: 0x040C08
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - button:
+                  id: tab_sys_btn
+                  x: 2
+                  y: 4
+                  width: 146
+                  height: 32
+                  radius: 4
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  widgets:
+                    - label: { id: tab_sys_l, align: CENTER, text: "SYSTEM", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: 'id(sys_tab) = 0;'
+                    - script.execute: atc_panel_sync
+              - button:
+                  id: tab_atc_btn
+                  x: 154
+                  y: 4
+                  width: 146
+                  height: 32
+                  radius: 4
+                  bg_color: 0x040C08
+                  border_width: 1
+                  border_color: 0xB07818
+                  widgets:
+                    - label: { id: tab_atc_l, align: CENTER, text: "ATC CONF", text_font: font_small, text_color: 0xE8A020 }
+                  on_click:
+                    - lambda: 'id(sys_tab) = 1;'
+                    - script.execute: atc_panel_sync
+
+        # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
+        - obj:
+            id: alarm_overlay
+            x: 140
+            y: 150
+            width: 520
+            height: 180
+            radius: 12
+            bg_color: 0x0A2416
+            border_color: 0x00E66E
+            border_width: 3
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - label:
+                  align: TOP_MID
+                  y: 18
+                  text: "ALARM"
+                  text_font: font_clock
+                  text_color: 0x00E66E
+              - button:
+                  x: 30
+                  y: 106
+                  width: 220
+                  height: 56
+                  radius: 8
+                  bg_color: 0x0A3A22
+                  border_width: 1
+                  border_color: 0x00A050
+                  widgets:
+                    - label: { align: CENTER, text: "SNOOZE 9m", text_font: font_mid, text_color: 0x00C060 }
+                  on_click:
+                    - script.execute: snooze_alarm
+              - button:
+                  x: 270
+                  y: 106
+                  width: 220
+                  height: 56
+                  radius: 8
+                  bg_color: 0x00C060
+                  widgets:
+                    - label: { align: CENTER, text: "DISMISS", text_font: font_mid, text_color: 0x04180C }
+                  on_click:
+                    - script.execute: stop_alarm
+
+    - id: settings_page
+      bg_color: 0x040C08
+      pad_all: 0
+      widgets:
+        - label:
+            x: 30
+            y: 20
+            text: "LOCATION / RANGE / POLL / SRC"
+            text_font: font_mid
+            text_color: 0x00E66E
+        # 依 LAT/RANGE/POLL 即時估算每日 OpenSky credits 消耗(1s interval 更新);免費來源顯示無額度提示
+        - label:
+            id: est_l
+            x: 30
+            y: 434
+            width: 410
+            text: ""
+            text_font: font_small
+            text_color: 0x9AE6B4
+            long_mode: WRAP
+        - label: { x: 30,  y: 78,  text: "LAT",   text_font: font_small, text_color: 0x9AE6B4 }
+        - label: { x: 30,  y: 138, text: "LON",   text_font: font_small, text_color: 0x9AE6B4 }
+        - label: { x: 30,  y: 198, text: "RANGE", text_font: font_small, text_color: 0x9AE6B4 }
+        - textarea: &ta_style
+            id: ta_lat
+            x: 110
+            y: 68
+            width: 220
+            height: 44
+            one_line: true
+            max_length: 10
+            accepted_chars: "0123456789.-"
+            text_font: font_mid
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 0;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
+        - textarea:
+            <<: *ta_style
+            id: ta_lon
+            y: 128
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 1;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
+        - textarea:
+            <<: *ta_style
+            id: ta_rng
+            y: 188
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 2;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
+        - label:
+            x: 350
+            y: 200
+            text: "km"
+            text_font: font_small
+            text_color: 0x6E8273
+        - label: { x: 30,  y: 258, text: "POLL",  text_font: font_small, text_color: 0x9AE6B4 }
+        - textarea:
+            <<: *ta_style
+            id: ta_poll
+            y: 248
+            max_length: 3
+            accepted_chars: "0123456789"
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 3;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x00E66E), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x006030), 0);
+        - label:
+            x: 350
+            y: 260
+            text: "s"
+            text_font: font_small
+            text_color: 0x6E8273
+        # 免費來源(airplanes.live / adsb.lol)專用抓取間隔
+        - label: { x: 30,  y: 318, text: "POLL2", text_font: font_small, text_color: 0x9AE6B4 }
+        - textarea:
+            <<: *ta_style
+            id: ta_poll2
+            y: 308
+            max_length: 3
+            accepted_chars: "0123456789"
+            on_click:
+              - lambda: |-
+                  id(kb_target) = 4;
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lat), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_lon), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_rng), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll), lv_color_hex(0x006030), 0);
+                  lv_obj_set_style_border_color((lv_obj_t *) id(ta_poll2), lv_color_hex(0x00E66E), 0);
+        - label:
+            x: 350
+            y: 320
+            text: "s"
+            text_font: font_small
+            text_color: 0x6E8273
+        # SET / CANCEL
+        - button:
+            x: 30
+            y: 368
+            width: 145
+            height: 56
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "SET", text_font: font_mid, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
+                  float lo = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lon)));
+                  float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
+                  if (la >= -90 && la <= 90) {
+                    auto c = id(home_lat).make_call(); c.set_value(la); c.perform();
+                  }
+                  if (lo >= -180 && lo <= 180) {
+                    auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
+                  }
+                  if (rg >= 10 && rg <= 500) {
+                    auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
+                  }
+                  int ps = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll)));
+                  if (ps >= 10 && ps <= 300) {
+                    auto c = id(poll_interval).make_call(); c.set_value(ps); c.perform();
+                  }
+                  int p2 = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll2)));
+                  if (p2 >= 5 && p2 <= 300) {
+                    auto c = id(poll_interval_alt).make_call(); c.set_value(p2); c.perform();
+                  }
+              - lvgl.page.show: main_page
+        - button:
+            x: 195
+            y: 368
+            width: 145
+            height: 56
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "CANCEL", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        # 航班資料來源(radio 三選一;OpenSky 失敗自動 fallback 到免費來源 10 分鐘)
+        - button:
+            id: src_btn0
+            x: 460
+            y: 16
+            width: 104
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn0_l
+                  align: CENTER
+                  text: "OPENSKY"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 0;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 0) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 0 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;   // 手動選來源即重置 fallback 冷卻
+        - button:
+            id: src_btn1
+            x: 572
+            y: 16
+            width: 104
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn1_l
+                  align: CENTER
+                  text: "A.LIVE"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 1;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 1) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 1 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;
+        - button:
+            id: src_btn2
+            x: 684
+            y: 16
+            width: 112
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: src_btn2_l
+                  align: CENTER
+                  text: "ADSB.LOL"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(data_src) = 2;
+                  lv_obj_t *sb[3] = {(lv_obj_t *) id(src_btn0), (lv_obj_t *) id(src_btn1),
+                                     (lv_obj_t *) id(src_btn2)};
+                  lv_obj_t *sl[3] = {id(src_btn0_l), id(src_btn1_l), id(src_btn2_l)};
+                  for (int m = 0; m < 3; m++) {
+                    if (m == 2) lv_obj_add_state(sb[m], LV_STATE_CHECKED);
+                    else lv_obj_clear_state(sb[m], LV_STATE_CHECKED);
+                    lv_obj_set_style_text_color(sl[m],
+                        lv_color_hex(m == 2 ? 0x04180C : 0x00C060), 0);
+                  }
+                  radar_bg::g_os_cooldown_until = 0;
+        # 背光關閉時是否持續抓取(勾選=關屏也更新;耗 API 額度,估算列會反映)
+        - button:
+            id: poff_btn
+            x: 460
+            y: 74
+            width: 336
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: poff_btn_l
+                  align: CENTER
+                  text: "UPDATE WHEN SCREEN OFF"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(poll_when_off) = lv_obj_has_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
+                  lv_obj_set_style_text_color(id(poff_btn_l),
+                      lv_color_hex(id(poll_when_off) ? 0x04180C : 0x00C060), 0);
+        # 顯示單位切換(左下角空位;公制/英制,影響溫度/速度/距離/高度/範圍顯示)
+        - button:
+            id: units_btn
+            x: 30
+            y: 378
+            width: 408
+            height: 44
+            radius: 4
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: units_btn_l
+                  align: CENTER
+                  text: "UNITS: METRIC"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(units_imperial) = lv_obj_has_state((lv_obj_t *) id(units_btn), LV_STATE_CHECKED);
+                  lv_label_set_text(id(units_btn_l), id(units_imperial) ? "UNITS: IMPERIAL" : "UNITS: METRIC");
+                  lv_obj_set_style_text_color(id(units_btn_l),
+                      lv_color_hex(id(units_imperial) ? 0x04180C : 0x00C060), 0);
+        # 手搓數字鍵盤(與整體風格一致)
+        - button:
+            x: 460
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "7", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '7');
+        - button:
+            x: 544
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "8", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '8');
+        - button:
+            x: 628
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "9", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '9');
+        - button:
+            x: 712
+            y: 140
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "<", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_del_char(ta);
+        - button:
+            x: 460
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "4", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '4');
+        - button:
+            x: 544
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "5", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '5');
+        - button:
+            x: 628
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "6", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '6');
+        - button:
+            x: 712
+            y: 218
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: ".", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '.');
+        - button:
+            x: 460
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "1", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '1');
+        - button:
+            x: 544
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "2", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '2');
+        - button:
+            x: 628
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "3", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '3');
+        - button:
+            x: 712
+            y: 296
+            width: 76
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "-", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '-');
+        - button:
+            x: 460
+            y: 374
+            width: 160
+            height: 70
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "0", text_font: font_mid, text_color: 0x00C060 }
+            on_click:
+              - lambda: |-
+                  lv_obj_t *ta = id(kb_target) == 0 ? (lv_obj_t *) id(ta_lat)
+                               : id(kb_target) == 1 ? (lv_obj_t *) id(ta_lon)
+                               : id(kb_target) == 2 ? (lv_obj_t *) id(ta_rng)
+                               : id(kb_target) == 3 ? (lv_obj_t *) id(ta_poll)
+                                                    : (lv_obj_t *) id(ta_poll2);
+                  lv_textarea_add_char(ta, '0');
+        - button:
+            x: 628
+            y: 374
+            width: 160
+            height: 70
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "ENTER", text_font: font_mid, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  float la = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lat)));
+                  float lo = atof(lv_textarea_get_text((lv_obj_t *) id(ta_lon)));
+                  float rg = atof(lv_textarea_get_text((lv_obj_t *) id(ta_rng)));
+                  if (la >= -90 && la <= 90) {
+                    auto c = id(home_lat).make_call(); c.set_value(la); c.perform();
+                  }
+                  if (lo >= -180 && lo <= 180) {
+                    auto c = id(home_lon).make_call(); c.set_value(lo); c.perform();
+                  }
+                  if (rg >= 10 && rg <= 500) {
+                    auto c = id(radar_range).make_call(); c.set_value(rg); c.perform();
+                  }
+                  int ps = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll)));
+                  if (ps >= 10 && ps <= 300) {
+                    auto c = id(poll_interval).make_call(); c.set_value(ps); c.perform();
+                  }
+                  int p2 = atoi(lv_textarea_get_text((lv_obj_t *) id(ta_poll2)));
+                  if (p2 >= 5 && p2 <= 300) {
+                    auto c = id(poll_interval_alt).make_call(); c.set_value(p2); c.perform();
+                  }
+              - lvgl.page.show: main_page
+
+    - id: config_page
+      bg_color: 0x040C08
+      pad_all: 0
+      scrollable: false
+      scrollbar_mode: "OFF"
+      widgets:
+        - label: { x: 20, y: 8, text: "NETWORK / OPENSKY API", text_font: font_small, text_color: 0x00E66E }
+        - label: { x: 20, y: 44,  text: "SSID",   text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 86,  text: "PASS",   text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 128, text: "API ID", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - label: { x: 20, y: 170, text: "SECRET", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - textarea:
+            id: ta_ssid
+            x: 92
+            y: 36
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 32
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_ssid));'
+        - textarea:
+            id: ta_pass
+            x: 92
+            y: 78
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 64
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_pass));'
+        - textarea:
+            id: ta_cid
+            x: 92
+            y: 120
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 96
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));'
+        - textarea:
+            id: ta_sec
+            x: 92
+            y: 162
+            width: 420
+            height: 34
+            one_line: true
+            max_length: 96
+            text_font: font_tiny
+            text_color: 0xD2E6D7
+            bg_color: 0x0A2416
+            border_color: 0x00A050
+            border_width: 1
+            radius: 4
+            on_click:
+              - lambda: 'lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_sec));'
+        - button:
+            x: 540
+            y: 40
+            width: 115
+            height: 48
+            radius: 6
+            bg_color: 0x00C060
+            widgets:
+              - label: { align: CENTER, text: "SAVE", text_font: font_small, text_color: 0x04180C }
+            on_click:
+              - lambda: |-
+                  const char *ss = lv_textarea_get_text((lv_obj_t *) id(ta_ssid));
+                  const char *ps = lv_textarea_get_text((lv_obj_t *) id(ta_pass));
+                  const char *ci = lv_textarea_get_text((lv_obj_t *) id(ta_cid));
+                  const char *se = lv_textarea_get_text((lv_obj_t *) id(ta_sec));
+                  if (strlen(ci) > 0) {
+                    auto c = id(opensky_client_id).make_call(); c.set_value(ci); c.perform();
+                  }
+                  if (strlen(se) > 0) {
+                    auto c = id(opensky_client_secret).make_call(); c.set_value(se); c.perform();
+                  }
+                  if (strlen(ss) > 0 && strlen(ps) > 0)
+                    wifi::global_wifi_component->save_wifi_sta(ss, ps);
+              - lvgl.page.show: main_page
+        - button:
+            x: 668
+            y: 40
+            width: 115
+            height: 48
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "BACK", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        - keyboard:
+            id: cfg_kb
+            align: BOTTOM_MID
+            y: 0
+            width: 800
+            height: 240
+            mode: TEXT_LOWER
+            text_font: montserrat_18
+            bg_color: 0x0A1810
+            pad_all: 3
+            items:
+              bg_color: 0x0A2416
+              text_color: 0x00C060
+              text_font: montserrat_18
+              border_color: 0x00A050
+              border_width: 1
+              radius: 4
+              pressed:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+              checked:
+                bg_color: 0x00A050
+                text_color: 0x04180C
+    - id: alarm_page
+      bg_color: 0x040C08
+      pad_all: 0
+      scrollable: false
+      scrollbar_mode: "OFF"
+      widgets:
+        - label: { x: 20, y: 16, text: "ALARMS", text_font: font_mid, text_color: 0x00E66E }
+        # 頂列:DEF=預設喇叭(鬧鐘未指定專屬喇叭時用它);各組專屬喇叭在各列右端的下拉選單
+        - label: { x: 122, y: 22, text: "DEF", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - dropdown:
+            id: spk_dd
+            x: 158
+            y: 10
+            width: 282
+            height: 40
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  // set_selected_index 會回打 on_value,值沒變就不重寫實體
+                  if (id(alarm_speaker).state == id(spk_ids)[i]) return;
+                  auto call = id(alarm_speaker)->make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        - button:
+            x: 452
+            y: 10
+            width: 96
+            height: 40
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "SCAN", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - script.execute: spk_scan
+        - button:
+            x: 660
+            y: 10
+            width: 120
+            height: 40
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "BACK", text_font: font_small, text_color: 0x00C060 }
+            on_click:
+              - lvgl.page.show: main_page
+        # ===== 鬧鐘 1:啟用|時分捲輪|星期|專屬喇叭 =====
+        - button:
+            id: a0_en
+            x: 20
+            y: 80
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a0_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_en(id(al0));'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0_tb
+            x: 112
+            y: 80
+            width: 130
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { id: a0_tl, align: CENTER, text: "00:00", text_font: font_mid, text_color: 0xD2E6D7 }
+            on_click:
+              - lambda: 'id(al_edit) = 0;'
+              - script.execute: tp_open
+        - button:
+            id: a0d0
+            x: 254
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d1
+            x: 298
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d2
+            x: 342
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d3
+            x: 386
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d4
+            x: 430
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d5
+            x: 474
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a0d6
+            x: 518
+            y: 84
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al0) = alarmpk::toggle_day(id(al0), 6);'
+              - script.execute: alarm_refresh
+        - dropdown:
+            id: a0_dd
+            x: 568
+            y: 84
+            width: 212
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  // set_selected_index 會回打 on_value,值沒變就不重寫實體
+                  if (id(al_spk0).state == id(spk_ids)[i]) return;
+                  auto call = id(al_spk0)->make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        # ===== 鬧鐘 2:啟用|時分捲輪|星期|專屬喇叭 =====
+        - button:
+            id: a1_en
+            x: 20
+            y: 162
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a1_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_en(id(al1));'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1_tb
+            x: 112
+            y: 162
+            width: 130
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { id: a1_tl, align: CENTER, text: "00:00", text_font: font_mid, text_color: 0xD2E6D7 }
+            on_click:
+              - lambda: 'id(al_edit) = 1;'
+              - script.execute: tp_open
+        - button:
+            id: a1d0
+            x: 254
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d1
+            x: 298
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d2
+            x: 342
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d3
+            x: 386
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d4
+            x: 430
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d5
+            x: 474
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a1d6
+            x: 518
+            y: 166
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al1) = alarmpk::toggle_day(id(al1), 6);'
+              - script.execute: alarm_refresh
+        - dropdown:
+            id: a1_dd
+            x: 568
+            y: 166
+            width: 212
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  // set_selected_index 會回打 on_value,值沒變就不重寫實體
+                  if (id(al_spk1).state == id(spk_ids)[i]) return;
+                  auto call = id(al_spk1)->make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        # ===== 鬧鐘 3:啟用|時分捲輪|星期|專屬喇叭 =====
+        - button:
+            id: a2_en
+            x: 20
+            y: 244
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a2_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_en(id(al2));'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2_tb
+            x: 112
+            y: 244
+            width: 130
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { id: a2_tl, align: CENTER, text: "00:00", text_font: font_mid, text_color: 0xD2E6D7 }
+            on_click:
+              - lambda: 'id(al_edit) = 2;'
+              - script.execute: tp_open
+        - button:
+            id: a2d0
+            x: 254
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d1
+            x: 298
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d2
+            x: 342
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d3
+            x: 386
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d4
+            x: 430
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d5
+            x: 474
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a2d6
+            x: 518
+            y: 248
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al2) = alarmpk::toggle_day(id(al2), 6);'
+              - script.execute: alarm_refresh
+        - dropdown:
+            id: a2_dd
+            x: 568
+            y: 248
+            width: 212
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  // set_selected_index 會回打 on_value,值沒變就不重寫實體
+                  if (id(al_spk2).state == id(spk_ids)[i]) return;
+                  auto call = id(al_spk2)->make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        # ===== 鬧鐘 4:啟用|時分捲輪|星期|專屬喇叭 =====
+        - button:
+            id: a3_en
+            x: 20
+            y: 326
+            width: 82
+            height: 52
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label: { id: a3_enl, align: CENTER, text: "OFF", text_font: font_small, text_color: 0x6E8273 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_en(id(al3));'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3_tb
+            x: 112
+            y: 326
+            width: 130
+            height: 52
+            radius: 6
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label: { id: a3_tl, align: CENTER, text: "00:00", text_font: font_mid, text_color: 0xD2E6D7 }
+            on_click:
+              - lambda: 'id(al_edit) = 3;'
+              - script.execute: tp_open
+        - button:
+            id: a3d0
+            x: 254
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Su", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 0);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d1
+            x: 298
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Mo", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 1);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d2
+            x: 342
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Tu", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 2);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d3
+            x: 386
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "We", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 3);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d4
+            x: 430
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Th", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 4);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d5
+            x: 474
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Fr", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 5);'
+              - script.execute: alarm_refresh
+        - button:
+            id: a3d6
+            x: 518
+            y: 330
+            width: 40
+            height: 44
+            radius: 6
+            checkable: true
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            checked:
+              bg_color: 0x00A050
+              border_color: 0x00A050
+            widgets:
+              - label: { align: CENTER, text: "Sa", text_font: font_tiny, text_color: 0x9AE6B4 }
+            on_click:
+              - lambda: 'id(al3) = alarmpk::toggle_day(id(al3), 6);'
+              - script.execute: alarm_refresh
+        - dropdown:
+            id: a3_dd
+            x: 568
+            y: 330
+            width: 212
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            # 彈出清單跟隨雷達主題:黑底綠字,選中項反白為綠底深色字
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            options:
+              - "PRESS SCAN"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i < 0 || i >= (int) id(spk_ids).size()) return;
+                  // set_selected_index 會回打 on_value,值沒變就不重寫實體
+                  if (id(al_spk3).state == id(spk_ids)[i]) return;
+                  auto call = id(al_spk3)->make_call();
+                  call.set_value(id(spk_ids)[i]);
+                  call.perform();
+        # ===== 時間選擇覆蓋層(點列上的時間開啟,預設隱藏;al_edit=編輯中的鬧鐘)=====
+        # ===== 時區設定(鬧鐘列壓縮後騰出的底部空間;呼應喇叭下拉的視覺)=====
+        - label: { x: 20, y: 396, text: "TIMEZONE", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - dropdown:
+            id: tz_dd
+            x: 20
+            y: 420
+            width: 300
+            height: 44
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 6
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            # 顯示名的 index 必須對齊 radar_bg::tz_posix() 的 POSIX 陣列
+            options:
+              - "TAIPEI"
+              - "TOKYO"
+              - "SHANGHAI"
+              - "HONG KONG"
+              - "SEOUL"
+              - "BANGKOK"
+              - "LONDON"
+              - "PARIS"
+              - "BERLIN"
+              - "NEW YORK"
+              - "LOS ANGELES"
+              - "UTC"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i == id(tz_sel)) return;          // set_selected_index 會回打,值沒變就跳過
+                  id(tz_sel) = i;
+                  id(rtc_time).set_timezone(radar_bg::tz_posix(i));
+        - obj:
+            id: tp_overlay
+            x: 210
+            y: 50
+            width: 380
+            height: 380
+            radius: 12
+            bg_color: 0x0A1810
+            border_color: 0x00E66E
+            border_width: 3
+            hidden: true
+            scrollbar_mode: "OFF"
+            widgets:
+              - label: { id: tp_title, align: TOP_MID, y: 10, text: "ALARM 1", text_font: font_mid, text_color: 0x00E66E }
+              - roller:
+                  id: tp_hr
+                  x: 36
+                  y: 52
+                  width: 120
+                  options: ["00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23"]
+                  visible_row_count: 3
+                  text_font: font_clock
+                  text_color: 0x6E8273
+                  bg_color: 0x0A2416
+                  border_width: 1
+                  border_color: 0x006030
+                  radius: 8
+                  selected:
+                    bg_color: 0x00A050
+                    text_color: 0x04180C
+                  on_value:
+                    - lambda: |-
+                        uint32_t *p[4] = { &id(al0), &id(al1), &id(al2), &id(al3) };
+                        uint32_t &a = *p[id(al_edit)];
+                        if ((int) x == alarmpk::hh(a)) return;
+                        a = alarmpk::set_h(a, (int) x);
+                    - script.execute: alarm_refresh
+              - label: { x: 166, y: 122, text: ":", text_font: font_clock, text_color: 0x6E8273 }
+              - roller:
+                  id: tp_mr
+                  x: 206
+                  y: 52
+                  width: 120
+                  options: ["00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59"]
+                  visible_row_count: 3
+                  text_font: font_clock
+                  text_color: 0x6E8273
+                  bg_color: 0x0A2416
+                  border_width: 1
+                  border_color: 0x006030
+                  radius: 8
+                  selected:
+                    bg_color: 0x00A050
+                    text_color: 0x04180C
+                  on_value:
+                    - lambda: |-
+                        uint32_t *p[4] = { &id(al0), &id(al1), &id(al2), &id(al3) };
+                        uint32_t &a = *p[id(al_edit)];
+                        if ((int) x == alarmpk::mm(a)) return;
+                        a = alarmpk::set_m(a, (int) x);
+                    - script.execute: alarm_refresh
+              - button:
+                  x: 36
+                  y: 248
+                  width: 290
+                  height: 52
+                  radius: 8
+                  bg_color: 0x00C060
+                  widgets:
+                    - label: { align: CENTER, text: "DONE", text_font: font_mid, text_color: 0x04180C }
+                  on_click:
+                    - lambda: 'lv_obj_add_flag((lv_obj_t *) id(tp_overlay), LV_OBJ_FLAG_HIDDEN);'

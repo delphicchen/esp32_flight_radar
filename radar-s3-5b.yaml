@@ -1,0 +1,24 @@
+# =============================================================
+# Flight Radar — Waveshare ESP32-S3-Touch-LCD-5B
+#   ESP32-S3 + 1024x600 parallel-RGB panel + GT911 touch (CH422G).
+#
+# Same firmware as radar.yaml, only the board + ui packages and the
+# resolution substitutions differ. See radar.yaml for the layout of
+# the package structure.
+# =============================================================
+
+substitutions:
+  disp_w: "1024"         # panel width  (px)
+  disp_h: "600"          # panel height (px)
+  radar_canvas: "570"    # radar canvas side (456 * 1.25) — matches ui/ui_1024x600.yaml
+  # font sizes scaled x1.25 from the 800x480 layout
+  f_small: "28"
+  f_mid: "35"
+  f_clock: "80"
+  f_mono: "23"
+  f_tiny: "18"
+
+packages:
+  core:  !include common/core.yaml
+  board: !include boards/waveshare_esp32s3_rgb_1024x600.yaml
+  ui:    !include ui/ui_1024x600.yaml

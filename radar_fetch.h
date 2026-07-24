@@ -2,18 +2,49 @@
 // 主迴圈用 request_states()/request_route() 丟工作,
 // 每秒輪詢 g_states_ready / g_route_ready 取結果。
 #pragma once
+// ---- Per-board geometry (override via build_flags in boards/*.yaml) ----
+//   RADAR_CANVAS  square radar canvas side (px); must equal the LVGL
+//                 base_canvas size in the matching ui/ package.
+//   SCREEN_W/H    panel size, used by the screenshot framebuffer copy.
+//   RADAR_DISPLAY_RGB  1 = parallel-RGB panel (rpi_dpi_rgb, framebuffer
+//                 screenshot available); 0 = other bus (e.g. MIPI-DSI on
+//                 ESP32-P4) where the RGB framebuffer grab does not apply.
+#ifndef RADAR_CANVAS
+#define RADAR_CANVAS 456
+#endif
+#ifndef SCREEN_W
+#define SCREEN_W 800
+#endif
+#ifndef SCREEN_H
+#define SCREEN_H 480
+#endif
+#ifndef RADAR_DISPLAY_RGB
+#define RADAR_DISPLAY_RGB 1
+#endif
+#define RADAR_CX (RADAR_CANVAS / 2)        // canvas center
+#define RADAR_R  (RADAR_CANVAS / 2 - 2)    // usable radar radius
+// UI scale factor vs the reference 800x480 layout (456px canvas). The LVGL
+// layouts for other resolutions are generated from that reference by
+// tools/scale_layout.py with the same round-half-up rule, so RS() of a
+// reference-layout pixel value always lands on the generated widget position.
+// Used by the YAML lambdas in common/core.yaml for page-coordinate math.
+#define RADAR_SCALE ((float) RADAR_CANVAS / 456.0f)
+#define RS(v) ((int) ((v) * RADAR_SCALE + 0.5f))
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cstring>
 #include <cmath>
+#include <map>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "esp_http_client.h"
 #include "esp_http_server.h"
+#if RADAR_DISPLAY_RGB
 #include "esp_lcd_panel_rgb.h"
+#endif
 #include "esp_heap_caps.h"
 #include "esp_flash.h"
 #include "esp_ota_ops.h"
@@ -25,7 +56,9 @@ extern "C" {
 #include "esp_log.h"
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/image/image.h"
+#if RADAR_DISPLAY_RGB
 #include "esphome/components/rpi_dpi_rgb/rpi_dpi_rgb.h"
+#endif
 #include "map_data.h"
 
 namespace radar_bg {
@@ -37,7 +70,7 @@ struct AcInfo {
 };
 
 struct Job {
-  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers
+  int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers, 6 = route cache
   std::string cid, sec, callsign;
   float lat, lon, range;
   int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
@@ -295,6 +328,38 @@ inline void do_route(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
+// ---- 全機隊起訖站快取(ATC ROUTE 標籤行)----
+// callsign → "KHH-KIX";"" = 查詢中,"-" = 查無資料(不再重查)。
+// 與 g_route 同一把 mtx 保護;背景 task 逐架查 adsbdb,查過即快取。
+inline std::map<std::string, std::string> g_rcache;
+
+inline void do_route_cache(const Job &j) {
+  int st = 0;
+  std::string r = http_req("https://api.adsbdb.com/v0/callsign/" + j.callsign,
+                           false, "", nullptr, "", st);
+  std::string rt = "-";
+  if (st == 200 && !r.empty()) {
+    esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+      JsonObject fr = root["response"]["flightroute"];
+      if (!fr.isNull()) {
+        const char *o = fr["origin"]["iata_code"] | "";
+        const char *d = fr["destination"]["iata_code"] | "";
+        if (o[0] != 0 && d[0] != 0) rt = std::string(o) + "-" + d;
+      }
+      return true;
+    });
+  } else if (st != 200 && st != 404) {
+    // 非 404 的失敗(網路/限流)不寫入快取,之後重試
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_rcache.erase(j.callsign);
+    xSemaphoreGive(mtx());
+    return;
+  }
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_rcache[j.callsign] = rt;
+  xSemaphoreGive(mtx());
+}
+
 // Open-Meteo 目前天氣(免金鑰、開源資料)→ g_wx
 inline void do_weather(const Job &j) {
   char url[224];
@@ -381,27 +446,27 @@ inline void echo_composite_tile(const std::string &url, uint8_t *tmp, int tw, in
   if (iw <= 0) iw = tw;
   if (fed < 0) { ESP_LOGW("radar_bg", "png decode err"); return; }
 
-  float kmpp = 2.0f * range / 456.0f;
+  float kmpp = 2.0f * range / (float) RADAR_CANVAS;
   float inv = tile_km / kmpp;
-  int x_lo = (int) floorf(228 + ((float) i - bx) * inv);
-  int x_hi = (int) ceilf (228 + ((float) (i + 1) - bx) * inv);
-  int y_lo = (int) floorf(228 + ((float) j - by) * inv);
-  int y_hi = (int) ceilf (228 + ((float) (j + 1) - by) * inv);
-  if (x_lo < 0) x_lo = 0; if (x_hi > 456) x_hi = 456;
-  if (y_lo < 0) y_lo = 0; if (y_hi > 456) y_hi = 456;
+  int x_lo = (int) floorf(RADAR_CX + ((float) i - bx) * inv);
+  int x_hi = (int) ceilf (RADAR_CX + ((float) (i + 1) - bx) * inv);
+  int y_lo = (int) floorf(RADAR_CX + ((float) j - by) * inv);
+  int y_hi = (int) ceilf (RADAR_CX + ((float) (j + 1) - by) * inv);
+  if (x_lo < 0) x_lo = 0; if (x_hi > RADAR_CANVAS) x_hi = RADAR_CANVAS;
+  if (y_lo < 0) y_lo = 0; if (y_hi > RADAR_CANVAS) y_hi = RADAR_CANVAS;
   for (int y = y_lo; y < y_hi; y++) {
-    float ky = by * tile_km + (y - 228) * kmpp;
+    float ky = by * tile_km + (y - RADAR_CX) * kmpp;
     int tj = (int) floorf(ky / tile_km);
     if (tj != j) continue;
     int ty = (int) ((ky - j * tile_km) / tile_km * th);
     if (ty < 0 || ty >= th) continue;
-    int dy2 = (y - 228) * (y - 228);
-    uint8_t *orow = g_echo_buf + (size_t) y * 456 * 3;
+    int dy2 = (y - RADAR_CX) * (y - RADAR_CX);
+    uint8_t *orow = g_echo_buf + (size_t) y * RADAR_CANVAS * 3;
     for (int x = x_lo; x < x_hi; x++) {
-      float kx = bx * tile_km + (x - 228) * kmpp;
+      float kx = bx * tile_km + (x - RADAR_CX) * kmpp;
       int ti = (int) floorf(kx / tile_km);
       if (ti != i) continue;
-      if ((x - 228) * (x - 228) + dy2 > 226 * 226) continue;   // 圓外(留透明)
+      if ((x - RADAR_CX) * (x - RADAR_CX) + dy2 > RADAR_R * RADAR_R) continue;   // 圓外(留透明)
       int tx = (int) ((kx - i * tile_km) / tile_km * tw);
       if (tx < 0 || tx >= tw) continue;
       uint8_t *sp = tmp + ((size_t) ty * tw + tx) * 4;
@@ -447,12 +512,12 @@ inline void do_echo(const Job &j) {
   // 緩衝(PSRAM):離屏 456*456*3 + tile 暫存 512*512*4
   const int TW = 512, TH = 512;
   if (!g_echo_buf)
-    g_echo_buf = (uint8_t *) heap_caps_malloc((size_t) 456 * 456 * 3, MALLOC_CAP_SPIRAM);
+    g_echo_buf = (uint8_t *) heap_caps_malloc((size_t) RADAR_CANVAS * RADAR_CANVAS * 3, MALLOC_CAP_SPIRAM);
   static uint8_t *tmp = nullptr;
   if (!tmp) tmp = (uint8_t *) heap_caps_malloc((size_t) TW * TH * 4, MALLOC_CAP_SPIRAM);
   if (!g_echo_buf || !tmp) { ESP_LOGE("radar_bg", "echo buf alloc fail"); return; }
 
-  memset(g_echo_buf, 0, (size_t) 456 * 456 * 3);   // 先清成透明(離屏,不影響畫面)
+  memset(g_echo_buf, 0, (size_t) RADAR_CANVAS * RADAR_CANVAS * 3);   // 先清成透明(離屏,不影響畫面)
   for (int k = 0; k < 4; k++) {
     char url[200];
     snprintf(url, sizeof(url), "%s%s/512/%d/%ld/%ld/2/1_1.png",
@@ -472,6 +537,7 @@ inline void task_fn(void *arg) {
     if (xQueueReceive(queue(), &j, portMAX_DELAY) == pdTRUE && j != nullptr) {
       if (j->type == 1) do_states(*j);
       else if (j->type == 2) do_route(*j);
+      else if (j->type == 6) do_route_cache(*j);
       else if (j->type == 3) do_echo(*j);
       else if (j->type == 4) do_weather(*j);
       else if (j->type == 5) do_speakers(*j);
@@ -520,6 +586,52 @@ inline void request_route(const std::string &cs) {
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
 }
 
+// 查起訖站快取;未知就排一次背景查詢。回傳 "" = 還不知道,"-" = 查無資料。
+// 佇列滿(深度 4)時清掉「查詢中」標記,下一幀重試,路線會分幾秒陸續補齊。
+inline std::string route_cache_get(const std::string &cs) {
+  if (cs.empty()) return "";
+  ensure_task();
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  auto it = g_rcache.find(cs);
+  if (it != g_rcache.end()) {
+    std::string v = it->second;
+    xSemaphoreGive(mtx());
+    return v;
+  }
+  if (g_rcache.size() > 120) g_rcache.clear();   // 防跨日航班累積吃 PSRAM
+  g_rcache[cs] = "";                             // 標記查詢中(去重)
+  xSemaphoreGive(mtx());
+  Job *j = new Job{6, "", "", cs, 0, 0, 0};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) {
+    delete j;
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_rcache.erase(cs);
+    xSemaphoreGive(mtx());
+  }
+  return "";
+}
+
+// ---- 時區:下拉選單 index → POSIX TZ 字串(供 time.set_timezone 執行期切換)----
+// 顯示名清單在 ui/ 的 dropdown options,兩邊 index 必須對齊。
+inline const char *tz_posix(int i) {
+  static const char *const T[] = {
+      "CST-8",                            // 0 Taipei
+      "JST-9",                            // 1 Tokyo
+      "CST-8",                            // 2 Shanghai
+      "HKT-8",                            // 3 Hong Kong
+      "KST-9",                            // 4 Seoul
+      "ICT-7",                            // 5 Bangkok
+      "GMT0BST,M3.5.0/1,M10.5.0",         // 6 London
+      "CET-1CEST,M3.5.0,M10.5.0/3",       // 7 Paris
+      "CET-1CEST,M3.5.0,M10.5.0/3",       // 8 Berlin
+      "EST5EDT,M3.2.0,M11.1.0",           // 9 New York
+      "PST8PDT,M3.2.0,M11.1.0",           // 10 Los Angeles
+      "UTC0",                             // 11 UTC
+  };
+  const int n = sizeof(T) / sizeof(T[0]);
+  return (i >= 0 && i < n) ? T[i] : T[0];
+}
+
 }  // namespace radar_bg
 
 // ---- 底圖層:底色+輪廓(快取)+ 預混合回波 + 距離環/十字線 → 單一不透明 canvas ----
@@ -536,7 +648,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
                                bool map_show, bool echo_show, uint8_t atc_layers) {
   lv_img_dsc_t *img = lv_canvas_get_img(cv);
   if (!img || !img->data) return;
-  const size_t BYTES = (size_t) 456 * 456 * sizeof(lv_color_t);
+  const size_t BYTES = (size_t) RADAR_CANVAS * RADAR_CANVAS * sizeof(lv_color_t);
   static uint8_t *cache = nullptr;   // 底色+輪廓快取(PSRAM,416KB)
   if (!cache) cache = (uint8_t *) heap_caps_malloc(BYTES, MALLOC_CAP_SPIRAM);
   static float c_lat = NAN, c_lon = NAN, c_rng = NAN;
@@ -564,8 +676,8 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         float n = (la - lat0) * 110.574f;
         float d2 = e * e + n * n;
         lv_point_t p;
-        p.x = (lv_coord_t) (228 + e / rng * 226.0f);
-        p.y = (lv_coord_t) (228 - n / rng * 226.0f);
+        p.x = (lv_coord_t) (RADAR_CX + e / rng * (float) RADAR_R);
+        p.y = (lv_coord_t) (RADAR_CX - n / rng * (float) RADAR_R);
         if (have_prev && (d2 <= r2 || pd2 <= r2)) {
           lv_point_t seg[2] = {prev, p};
           lv_canvas_draw_line(cv, seg, 2, &dsc);
@@ -584,7 +696,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   if (echo_show && radar_bg::g_echo_buf) {
     lv_color_t *dst = (lv_color_t *) (void *) img->data;
     const uint8_t *sp = radar_bg::g_echo_buf;
-    for (size_t px = 0; px < (size_t) 456 * 456; px++, sp += 3) {
+    for (size_t px = 0; px < (size_t) RADAR_CANVAS * RADAR_CANVAS; px++, sp += 3) {
       if (sp[2] < 8) continue;   // 無降雨=透明,保留底圖
       lv_color_t fg;
       fg.full = (uint16_t) sp[0] | ((uint16_t) sp[1] << 8);
@@ -596,17 +708,17 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   lv_draw_line_dsc_init(&xd);
   xd.color = lv_color_hex(0x003820);
   xd.width = 1;
-  lv_point_t xh[2] = {{0, 228}, {456, 228}};
+  lv_point_t xh[2] = {{0, RADAR_CX}, {RADAR_CANVAS, RADAR_CX}};
   lv_canvas_draw_line(cv, xh, 2, &xd);
-  lv_point_t xv[2] = {{228, 0}, {228, 456}};
+  lv_point_t xv[2] = {{RADAR_CX, 0}, {RADAR_CX, RADAR_CANVAS}};
   lv_canvas_draw_line(cv, xv, 2, &xd);
   lv_draw_arc_dsc_t ad;
   lv_draw_arc_dsc_init(&ad);
   ad.color = lv_color_hex(0x006030);
   ad.width = 1;
-  static const lv_coord_t RINGS[4] = {228, 171, 114, 57};
+  const lv_coord_t RINGS[4] = {RADAR_CX, (lv_coord_t)(RADAR_CX*3/4), (lv_coord_t)(RADAR_CX/2), (lv_coord_t)(RADAR_CX/4)};
   for (int k = 0; k < 4; k++)
-    lv_canvas_draw_arc(cv, 228, 228, RINGS[k], 0, 360, &ad);
+    lv_canvas_draw_arc(cv, RADAR_CX, RADAR_CX, RINGS[k], 0, 360, &ad);
   // ---- ATC 靜態圖層(僅 ATC 模式,依 bitmask 逐層開關):空域/跑道+延伸線/機場/導航點 ----
   // 跟距離環一樣每次重建時畫、不進快取;重建只在切換或座標變更時發生,成本無感
   if (atc_layers) {
@@ -615,8 +727,8 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
     auto prj = [&](float la, float lo, float &e, float &n, lv_point_t &p) {
       e = (lo - lon0) * 111.320f * coslat;
       n = (la - lat0) * 110.574f;
-      p.x = (lv_coord_t) (228 + e / rng * 226.0f);
-      p.y = (lv_coord_t) (228 - n / rng * 226.0f);
+      p.x = (lv_coord_t) (RADAR_CX + e / rng * (float) RADAR_R);
+      p.y = (lv_coord_t) (RADAR_CX - n / rng * (float) RADAR_R);
     };
     // 空域邊界(最底):TMA/CTA 暗藍、CTR 類亮一階
     if (atc_layers & 1) {
@@ -729,6 +841,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
 inline uint8_t *g_shot_buf = nullptr;        // 800*480*2 快照(PSRAM,首次截圖才配置)
 inline volatile bool g_shot_valid = false;
 
+#if RADAR_DISPLAY_RGB
 // esp_lcd panel handle 在 ESPHome 元件裡是 protected,用衍生類取用(單 FB,拿到即當前畫面)
 struct RpiSpy : public esphome::rpi_dpi_rgb::RpiDpiRgb {
   static esp_lcd_panel_handle_t handle(esphome::rpi_dpi_rgb::RpiDpiRgb *d) {
@@ -738,7 +851,7 @@ struct RpiSpy : public esphome::rpi_dpi_rgb::RpiDpiRgb {
 
 inline esp_err_t shot_http_get(httpd_req_t *req) {
   if (!g_shot_valid || !g_shot_buf) { httpd_resp_send_404(req); return ESP_OK; }
-  const int W = 800, H = 480;
+  const int W = SCREEN_W, H = SCREEN_H;
   // 24-bit BMP 標頭(row 3*800 是 4 的倍數,免 padding)
   uint8_t hdr[54] = {0};
   uint32_t img = (uint32_t) W * H * 3, sz = 54 + img, off = 54, ihsz = 40;
@@ -750,7 +863,7 @@ inline esp_err_t shot_http_get(httpd_req_t *req) {
   memcpy(hdr + 26, &planes, 2);  memcpy(hdr + 28, &bpp, 2);  memcpy(hdr + 34, &img, 4);
   httpd_resp_set_type(req, "image/bmp");
   httpd_resp_send_chunk(req, (const char *) hdr, 54);
-  static uint8_t row[800 * 3];
+  static uint8_t row[SCREEN_W * 3];
   for (int y = H - 1; y >= 0; y--) {         // BMP 由下往上
     const uint16_t *src = (const uint16_t *) g_shot_buf + (size_t) y * W;
     for (int x = 0; x < W; x++) {
@@ -770,7 +883,7 @@ inline esp_err_t shot_http_get(httpd_req_t *req) {
 }
 
 inline bool screenshot_capture(esphome::rpi_dpi_rgb::RpiDpiRgb *disp) {
-  const size_t BYTES = (size_t) 800 * 480 * 2;
+  const size_t BYTES = (size_t) SCREEN_W * SCREEN_H * 2;
   if (!g_shot_buf) g_shot_buf = (uint8_t *) heap_caps_malloc(BYTES, MALLOC_CAP_SPIRAM);
   if (!g_shot_buf) return false;
   void *fb = nullptr;
@@ -796,6 +909,12 @@ inline bool screenshot_capture(esphome::rpi_dpi_rgb::RpiDpiRgb *disp) {
   }
   return true;
 }
+#else   // RADAR_DISPLAY_RGB == 0 : non-RGB bus (e.g. ESP32-P4 MIPI-DSI)
+// Framebuffer screenshot relies on the parallel-RGB panel API; disable it on
+// other display buses so the rest of the firmware still builds. Returns false
+// so the caller reports "screenshot unavailable" instead of crashing.
+inline bool screenshot_capture(void *disp) { (void) disp; return false; }
+#endif  // RADAR_DISPLAY_RGB
 
 // ---- 系統資訊(i 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 / API 額度 填入右下角六個 label ----
 inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,

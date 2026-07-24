@@ -1,0 +1,130 @@
+# =====================================================================
+#  Board: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B
+#         ESP32-P4 (RISC-V) + 32 MB hex PSRAM
+#         1024x600 MIPI-DSI (EK79007) panel + GT911 touch
+#         Wi-Fi 6 / BT via an ESP32-C6 co-processor over SDIO (esp-hosted)
+#
+#  This board differs from the S3 boards in three big ways, all handled
+#  here so common/core.yaml + the LVGL layout stay shared:
+#    1. Display bus is MIPI-DSI, not parallel-RGB -> `mipi_dsi` platform
+#       with the built-in Waveshare panel model (dimensions/timings/init).
+#    2. Wi-Fi lives on an ESP32-C6 reached over SDIO -> `esp32_hosted`.
+#    3. The RGB-framebuffer screenshot does not apply on DSI, so the C++
+#       helper is compiled out with RADAR_DISPLAY_RGB=0 (screenshots
+#       become a no-op; everything else is identical).
+#
+#  >>> VERIFY on your unit: the ESP32-C6 SDIO pins, backlight GPIO and I2C
+#      pins below come from the published Waveshare P4 family wiring and
+#      ESPHome's built-in panel model. Cross-check the reset/SDIO pins
+#      against your board revision if Wi-Fi or the panel do not come up. <<<
+#
+#  Resolution / radar geometry come from radar-p4-7b.yaml.
+# =====================================================================
+
+# ---- Resolution-driven build flags for the C++ includes ----
+esphome:
+  platformio_options:
+    build_flags:
+      - "-DSCREEN_W=${disp_w}"
+      - "-DSCREEN_H=${disp_h}"
+      - "-DRADAR_CANVAS=${radar_canvas}"
+      - "-DRADAR_DISPLAY_RGB=0"    # MIPI-DSI: disable the RGB framebuffer screenshot
+
+esp32:
+  board: esp32-p4-evboard
+  flash_size: 16MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+
+psram:
+  mode: hex        # ESP32-P4 only supports HEX-mode PSRAM
+  speed: 200MHz
+
+# ---- Wi-Fi 6 / BT co-processor (ESP32-C6 over SDIO) ----
+# `wifi:` in common/core.yaml requires this on the P4 (no native radio).
+esp32_hosted:
+  variant: ESP32C6
+  active_high: true
+  reset_pin: GPIO54
+  clk_pin: GPIO18
+  cmd_pin: GPIO19
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  bus_width: 4
+  slot: 1
+
+# ---- Backlight (real PWM GPIO on the P4 board) ----
+output:
+  - platform: ledc
+    pin:
+      number: GPIO26
+      inverted: true            # Waveshare P4 backlight is active-low
+    id: bl_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: bl_pwm
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- Touch (GT911, I2C) ----
+i2c:
+  sda: GPIO7
+  scl: GPIO8
+  frequency: 400kHz
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    update_interval: 20ms
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次;DSI 上截圖停用,手勢無作用)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
+
+# ---- MIPI-DSI PHY power rail (required by the DSI display on ESP32-P4) ----
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+# ---- Display (MIPI-DSI, driven by LVGL) ----
+# The panel model carries the resolution, DSI lanes, timings and init
+# sequence for this exact board, so only the behaviour flags are set here.
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    update_interval: never
+    auto_clear_enabled: false

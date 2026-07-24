@@ -31,7 +31,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 - **Map outline overlay** — optional coastline / administrative border layer (Taiwan by default), toggle on screen.
 - **Home Assistant integration** — the device auto-discovers in HA; backlight, Wi-Fi signal and buttons become HA entities.
 - **Alarm clock** — up to 4 alarms, each with per-weekday scheduling. Alarms ring through a **Home Assistant media player** (any Wi-Fi speaker); **each alarm can ring on its own speaker** (e.g. weekday alarm in the bedroom, weekend alarm in the living room). On-screen **Snooze / Dismiss** overlay when ringing.
-- **Fully on-device setup** — first boot opens a Wi-Fi captive portal. Coordinates, scan range, poll interval, OpenSky credentials and the alarm speaker can all be entered **on the touch screen** (or via the web page / Home Assistant). Everything is stored in NVS and survives reboots.
+- **Fully on-device setup** — first boot opens a Wi-Fi captive portal. Coordinates, scan range, poll interval, OpenSky credentials and the alarm speaker can all be entered **on the touch screen** (or via the web page / Home Assistant). A **timezone** dropdown (alarm page) and a **metric/imperial units** toggle (settings page — switches °C/°F, km·h/mph, km/mi, m/ft and the range unit) are set on screen too. Everything is stored in NVS and survives reboots.
 - **OTA updates** — after the first USB flash, all future updates are wireless.
 
 ### Hardware
@@ -44,20 +44,54 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 | Power | USB-C |
 | Enclosure | 3D-printable case ships with the board's SDK |
 
-#### Compatible boards
+#### Supported boards & project structure
 
-The exact board is a generic **"esp32-s3-5inch-rgb-001"** panel sold on AliExpress/Taobao, but nothing in the firmware is vendor-specific. Any board that matches this combo should work after editing the pin map:
+The firmware is split into **reusable packages** so a new display board is just a
+new board file plus a matching layout — the shared logic never changes:
 
-- **ESP32-S3** with **8 MB octal PSRAM** — required; quad-PSRAM boards cannot feed the RGB panel (the config runs PSRAM at 120 MHz octal)
-- **800×480 parallel-RGB (DPI) display** — the `rpi_dpi_rgb` driver is used; SPI / QSPI / MIPI panels would need a different display platform
-- **GT911** I²C touch controller (FT5x06 / CST8xx need a different `touchscreen` platform)
-- **16 MB flash** — or change `flash_size` in `radar.yaml` (the firmware itself is ~1.4 MB)
+```
+radar.yaml            entry: ESP32-S3 + 800×480 RGB   (the original board)
+radar-s3-5b.yaml      entry: Waveshare ESP32-S3-Touch-LCD-5B  (1024×600 RGB)
+radar-p4-7b.yaml      entry: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024×600 MIPI-DSI)
+common/core.yaml      shared logic + UI-independent components (fonts, scripts, …)
+boards/*.yaml         per-board hardware: MCU / PSRAM / display / touch / backlight
+ui/ui_800x480.yaml    LVGL layout at 800×480
+ui/ui_1024x600.yaml   LVGL layout at 1024×600  (auto-scaled from the 800×480 source)
+```
 
-Candidates include the Waveshare ESP32-S3-Touch-LCD-5, Sunton ESP32-8048S050 and Guition JC8048W550. To port: edit the backlight / I²C / RGB pins and the panel timings in the **Hardware pin map** section of `radar.yaml` to match your board's schematic. The UI layout is fixed at 800×480 landscape — other resolutions need a layout rework.
+Each entry file just picks a resolution (via `substitutions`) and a `board` + `ui`
+package. Screen size flows into the fonts, the display driver and the C++ helpers
+(through `build_flags` → `radar_fetch.h` macros), so there are no hard-coded
+dimensions left to chase.
+
+| Entry | Board | MCU | Panel | Wi-Fi | Status |
+|-------|-------|-----|-------|-------|--------|
+| `radar.yaml` | esp32-s3-5inch-rgb-001 (generic) | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | **verified on hardware** |
+| `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 parallel-RGB | native | config-validated, **verify pins/timings on device** |
+| `radar-p4-7b.yaml` | Waveshare ESP32-P4-WIFI6-Touch-LCD-7B | ESP32-P4 | 1024×600 MIPI-DSI (EK79007) | ESP32-C6 (esp-hosted/SDIO) | config-validated, **verify pins on device** |
+
+Common requirements for the RGB boards: **≥8 MB octal PSRAM** (quad-PSRAM can't feed
+the RGB panel), a **GT911** I²C touch controller, and 16 MB flash (`flash_size` is set
+per board). Other generic 800×480 RGB+GT911 boards (Sunton ESP32-8048S050, Guition
+JC8048W550, …) work with `radar.yaml` after matching the pins in
+`boards/esp32s3_rgb_800x480.yaml`.
+
+**Adding a board:** drop a new file in `boards/`, set its pins/driver, then copy an
+entry file and point `board:`/`ui:` at it. For a new resolution, regenerate a layout
+with `python3 tools/scale_layout.py ui/ui_800x480.yaml ui/ui_<w>x<h>.yaml <factor>`
+and set `radar_canvas`/font sizes to match.
+
+> **The two new boards are validated with `esphome config` but have not yet been
+> flashed by the author.** The pin maps come from the published Waveshare wiring and
+> ESPHome's built-in panel models; the 1024×600 layout is the 800×480 UI scaled ×1.25
+> as a starting point. Cross-check the pins/timings marked `verify` in the board files
+> against your unit, and fine-tune the layout on screen. On the ESP32-P4 the parallel-RGB
+> framebuffer screenshot is compiled out (MIPI-DSI has no equivalent grab); every other
+> feature is shared.
 
 ### Software requirements
 
-- [ESPHome](https://esphome.io/) 2025.7 or newer (`pip install esphome`)
+- **[ESPHome](https://esphome.io/) 2026.3.x is recommended** (`pip install esphome==2026.3.*`). The firmware calls the LVGL **v8** canvas draw API directly, so it does **not** build on 2026.4.0+ (which switched to LVGL v9) — see issue #5. The 1024×600 boards additionally need the `mipi_rgb` / `mipi_dsi` drivers added in 2025.9.0, so their working range is **2025.9 – 2026.3** (2026.3.x covers all three boards). The original 800×480 `radar.yaml` works on any ≤ 2026.3.x.
 - The dependency `pngle` is pulled in automatically via `platformio_options`.
 
 ### Flashing
@@ -65,7 +99,10 @@ Candidates include the Waveshare ESP32-S3-Touch-LCD-5, Sunton ESP32-8048S050 and
 ```bash
 git clone https://github.com/delphicchen/esp32_flight_radar
 cd esp32_flight_radar
-esphome run radar.yaml
+esphome run radar.yaml          # ESP32-S3 800×480 (original board)
+# or, for the newer panels:
+# esphome run radar-s3-5b.yaml  # Waveshare ESP32-S3-Touch-LCD-5B  (1024×600)
+# esphome run radar-p4-7b.yaml  # Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024×600)
 ```
 
 First flash must be over **USB** (`/dev/ttyUSB0` or `/dev/ttyACM0`; add yourself to the `dialout` group on Linux). If the upload stalls, hold **BOOT**, tap **RESET**, release **BOOT** to enter download mode. After that, `esphome run` updates over the air.
@@ -117,6 +154,7 @@ Press the **ATC** button (in the top-right button row, between **ECHO** and **PW
 - Selected aircraft (no conflict) stay white.
 - **Static video map:** ATC mode also bakes the `map_data.h` overlays into the base layer — airspace boundaries (CTR-class zones brighter blue, TMA/CTA dimmer), runways with **dashed extended centerlines**, airport squares with ICAO codes, and navaid/fix triangles with names. All of it disappears when ATC mode is switched off.
 - **Layer panel:** the **SYS** button has two amber tabs — **SYSTEM** (hardware info + remaining OpenSky API quota, or the active free source when on airplanes.live / adsb.lol) and **ATC CONF**, where four toggles (**AIRSPACE / RUNWAY / AIRPORT / FIXES**) choose which map layers to draw (saved to NVS). The idle bottom-right panel keeps showing the local weather as usual.
+- **Route line (ROUTE):** a fifth toggle in **ATC CONF**. When on, each label grows a third line with the flight's **origin–destination** (e.g. `KHH-KIX`), looked up per aircraft from [adsbdb.com](https://www.adsbdb.com/) in the background and cached, so each callsign is fetched only once. Lines appear as lookups complete (a few seconds); flights unknown to adsbdb simply show no third line. Saved to NVS like the other layer toggles.
 
 ### Screenshots to Home Assistant
 
@@ -224,7 +262,7 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 - **地圖輪廓圖層** — 可選的海岸線 / 行政區界(預設台灣),螢幕按鈕開關。
 - **Home Assistant 整合** — 裝置會自動被 HA 探索;背光、Wi-Fi 訊號與按鈕都成為 HA 實體。
 - **鬧鐘** — 最多 4 組,每組可設定特定星期幾。鬧鐘透過 **Home Assistant 的媒體播放器**(任何 Wi-Fi 喇叭)發聲,且**每組鬧鐘可指定不同喇叭**(例如平日鬧鐘在臥室響、週末鬧鐘在客廳響)。響鈴時螢幕出現**貪睡 / 關閉**面板。
-- **完全在裝置上設定** — 首次開機開啟 Wi-Fi 設定熱點。座標、掃描半徑、輪詢間隔、OpenSky 憑證、鬧鐘喇叭都可以**直接在觸控螢幕上輸入**(也可透過網頁 / Home Assistant)。全部存於 NVS,重開機保留。
+- **完全在裝置上設定** — 首次開機開啟 Wi-Fi 設定熱點。座標、掃描半徑、輪詢間隔、OpenSky 憑證、鬧鐘喇叭都可以**直接在觸控螢幕上輸入**(也可透過網頁 / Home Assistant)。**時區**下拉(鬧鐘頁)與**公制/英制單位**切換(設定頁——切換 °C/°F、km·h/mph、km/mi、m/ft 及範圍單位)也在螢幕上設定。全部存於 NVS,重開機保留。
 - **OTA 無線更新** — 第一次用 USB 燒錄後,之後都能無線更新。
 
 ### 硬體
@@ -237,20 +275,45 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 | 供電 | USB-C |
 | 外殼 | 方案板 SDK 附 3D 列印外殼檔 |
 
-#### 相容板子
+#### 支援的板子與專案結構
 
-本專案用的是淘寶/AliExpress 常見的白牌 **「esp32-s3-5inch-rgb-001」** 方案板,但韌體沒有綁定任何廠商。符合以下組合的板子改腳位後都能用:
+韌體已拆成**可重用的 packages**,新增一塊螢幕只要加一個 board 檔加一份對應版面,共用邏輯完全不動:
 
-- **ESP32-S3 + 8 MB octal PSRAM** — 必要;quad PSRAM 頻寬餵不動 RGB 屏(設定跑 120 MHz octal)
-- **800×480 平行 RGB(DPI)螢幕** — 使用 `rpi_dpi_rgb` 驅動;SPI / QSPI / MIPI 屏需要換 display 平台
-- **GT911** I²C 觸控(FT5x06 / CST8xx 要換 `touchscreen` 平台)
-- **16 MB flash** — 或修改 `radar.yaml` 的 `flash_size`(韌體本身約 1.4 MB)
+```
+radar.yaml            入口:ESP32-S3 + 800×480 RGB(原始板)
+radar-s3-5b.yaml      入口:微雪 ESP32-S3-Touch-LCD-5B(1024×600 RGB)
+radar-p4-7b.yaml      入口:微雪 ESP32-P4-WIFI6-Touch-LCD-7B(1024×600 MIPI-DSI)
+common/core.yaml      共用邏輯 + 與版面無關的元件(字型、腳本…)
+boards/*.yaml         各板硬體:MCU / PSRAM / 螢幕 / 觸控 / 背光
+ui/ui_800x480.yaml    800×480 的 LVGL 版面
+ui/ui_1024x600.yaml   1024×600 版面(由 800×480 自動放大生成)
+```
 
-可行的例子:Waveshare ESP32-S3-Touch-LCD-5、Sunton ESP32-8048S050、Guition JC8048W550。移植方式:照你板子的原理圖修改 `radar.yaml` 中 **Hardware pin map** 區的背光 / I²C / RGB 腳位與面板時序即可。UI 版面寫死 800×480 橫向,其他解析度需要重排版面。
+入口檔只用 `substitutions` 選解析度,再挑 `board` + `ui` 兩個 package。解析度會流進字型、
+display 驅動與 C++ 巨集(透過 `build_flags` → `radar_fetch.h`),不再有寫死的尺寸。
+
+| 入口 | 板子 | 主晶片 | 螢幕 | Wi-Fi | 狀態 |
+|------|------|--------|------|-------|------|
+| `radar.yaml` | esp32-s3-5inch-rgb-001(白牌) | ESP32-S3 | 800×480 平行 RGB | 內建 | **已在實機驗證** |
+| `radar-s3-5b.yaml` | 微雪 ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 平行 RGB | 內建 | 已過 config 驗證,**腳位/時序請上機確認** |
+| `radar-p4-7b.yaml` | 微雪 ESP32-P4-WIFI6-Touch-LCD-7B | ESP32-P4 | 1024×600 MIPI-DSI | ESP32-C6(esp-hosted/SDIO) | 已過 config 驗證,**腳位請上機確認** |
+
+RGB 板共同需求:**≥8 MB octal PSRAM**(quad 餵不動 RGB 屏)、**GT911** I²C 觸控、16 MB flash
+(`flash_size` 各板自訂)。其他白牌 800×480 RGB+GT911 板(Sunton ESP32-8048S050、Guition
+JC8048W550…)照 `boards/esp32s3_rgb_800x480.yaml` 對腳位即可用 `radar.yaml`。
+
+**新增板子:**在 `boards/` 放一個新檔設定腳位/驅動,再複製一個入口檔把 `board:`/`ui:` 指過去。
+換新解析度時用 `python3 tools/scale_layout.py ui/ui_800x480.yaml ui/ui_<w>x<h>.yaml <倍率>`
+生成版面,並把 `radar_canvas`/字型大小對應調整。
+
+> **兩塊新板已用 `esphome config` 驗證,但作者尚未實機燒錄。**腳位取自微雪公開接線與 ESPHome
+> 內建面板 model;1024×600 版面是把 800×480 版面 ×1.25 放大的起點。請對照 board 檔中標記
+> `verify` 的腳位/時序,並在螢幕上微調版面。ESP32-P4(MIPI-DSI)上會關閉平行 RGB 的截圖功能
+> (DSI 無對應的 framebuffer 抓取),其餘功能完全共用。
 
 ### 軟體需求
 
-- [ESPHome](https://esphome.io/) 2025.7 以上(`pip install esphome`)
+- **建議 [ESPHome](https://esphome.io/) 2026.3.x**(`pip install esphome==2026.3.*`)。韌體直接呼叫 LVGL **v8** canvas 繪圖 API,故 **無法**在 2026.4.0+(改用 LVGL v9)編譯——見 issue #5。兩塊 1024×600 板另需 2025.9.0 才加入的 `mipi_rgb` / `mipi_dsi` 驅動,可用範圍為 **2025.9 – 2026.3**(2026.3.x 三塊板全涵蓋)。原始 800×480 `radar.yaml` 在任何 ≤2026.3.x 皆可。
 - 相依的 `pngle` 會由 `platformio_options` 自動安裝。
 
 ### 燒錄
@@ -258,7 +321,10 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 ```bash
 git clone https://github.com/delphicchen/esp32_flight_radar
 cd esp32_flight_radar
-esphome run radar.yaml
+esphome run radar.yaml          # ESP32-S3 800×480(原始板)
+# 新面板改用:
+# esphome run radar-s3-5b.yaml  # 微雪 ESP32-S3-Touch-LCD-5B(1024×600)
+# esphome run radar-p4-7b.yaml  # 微雪 ESP32-P4-WIFI6-Touch-LCD-7B(1024×600)
 ```
 
 第一次必須用 **USB** 燒錄(`/dev/ttyUSB0` 或 `/dev/ttyACM0`;Linux 上把自己加入 `dialout` 群組)。若燒錄卡住,按住 **BOOT**、點一下 **RESET**、放開 **BOOT** 進入下載模式。之後 `esphome run` 就能走 OTA 無線更新。
@@ -310,6 +376,7 @@ esphome run radar.yaml
 - 選取中且無衝突的飛機維持白色。
 - **靜態航圖(video map)**:ATC 模式同時把 `map_data.h` 的圖層烤進底圖——管制空域邊界(CTR 類亮藍、TMA/CTA 暗藍)、跑道與**虛線延伸中線**、機場方塊+ICAO 代碼、導航點三角+名稱。關閉 ATC 模式即全部消失。
 - **圖層面板**:**SYS** 鈕內有兩個 amber 色分頁——**SYSTEM**(硬體資訊+OpenSky API 當日剩餘額度;用免費來源時改顯示目前來源)與 **ATC CONF**,後者的四個開關(**AIRSPACE / RUNWAY / AIRPORT / FIXES**)設定要畫哪些航圖圖層(存 NVS)。右下閒置畫面維持顯示在地天氣,跟原本一樣。
+- **起訖站行(ROUTE)**:**ATC CONF** 的第五個開關。開啟後每個標籤多出第三行**起訖機場**(例 `KHH-KIX`),逐架在背景向 [adsbdb.com](https://www.adsbdb.com/) 查詢並快取,同一呼號只查一次;查詢完成後幾秒內陸續浮現,adsbdb 查無資料的航班就不顯示第三行。與其他圖層開關一樣存 NVS。
 
 ### 截圖存到 Home Assistant
 
