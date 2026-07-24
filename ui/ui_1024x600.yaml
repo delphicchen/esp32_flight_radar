@@ -2769,7 +2769,7 @@ lvgl:
         - button:
             id: a1_en
             x: 25
-            y: 233
+            y: 203
             width: 103
             height: 65
             radius: 8
@@ -2788,7 +2788,7 @@ lvgl:
         - button:
             id: a1_tb
             x: 140
-            y: 233
+            y: 203
             width: 163
             height: 65
             radius: 8
@@ -2803,7 +2803,7 @@ lvgl:
         - button:
             id: a1d0
             x: 318
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2822,7 +2822,7 @@ lvgl:
         - button:
             id: a1d1
             x: 373
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2841,7 +2841,7 @@ lvgl:
         - button:
             id: a1d2
             x: 428
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2860,7 +2860,7 @@ lvgl:
         - button:
             id: a1d3
             x: 483
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2879,7 +2879,7 @@ lvgl:
         - button:
             id: a1d4
             x: 538
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2898,7 +2898,7 @@ lvgl:
         - button:
             id: a1d5
             x: 593
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2917,7 +2917,7 @@ lvgl:
         - button:
             id: a1d6
             x: 648
-            y: 238
+            y: 208
             width: 50
             height: 55
             radius: 8
@@ -2936,7 +2936,7 @@ lvgl:
         - dropdown:
             id: a1_dd
             x: 710
-            y: 238
+            y: 208
             width: 265
             height: 55
             text_font: font_small
@@ -2970,7 +2970,7 @@ lvgl:
         - button:
             id: a2_en
             x: 25
-            y: 365
+            y: 305
             width: 103
             height: 65
             radius: 8
@@ -2989,7 +2989,7 @@ lvgl:
         - button:
             id: a2_tb
             x: 140
-            y: 365
+            y: 305
             width: 163
             height: 65
             radius: 8
@@ -3004,7 +3004,7 @@ lvgl:
         - button:
             id: a2d0
             x: 318
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3023,7 +3023,7 @@ lvgl:
         - button:
             id: a2d1
             x: 373
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3042,7 +3042,7 @@ lvgl:
         - button:
             id: a2d2
             x: 428
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3061,7 +3061,7 @@ lvgl:
         - button:
             id: a2d3
             x: 483
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3080,7 +3080,7 @@ lvgl:
         - button:
             id: a2d4
             x: 538
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3099,7 +3099,7 @@ lvgl:
         - button:
             id: a2d5
             x: 593
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3118,7 +3118,7 @@ lvgl:
         - button:
             id: a2d6
             x: 648
-            y: 370
+            y: 310
             width: 50
             height: 55
             radius: 8
@@ -3137,7 +3137,7 @@ lvgl:
         - dropdown:
             id: a2_dd
             x: 710
-            y: 370
+            y: 310
             width: 265
             height: 55
             text_font: font_small
@@ -3171,7 +3171,7 @@ lvgl:
         - button:
             id: a3_en
             x: 25
-            y: 498
+            y: 408
             width: 103
             height: 65
             radius: 8
@@ -3190,7 +3190,7 @@ lvgl:
         - button:
             id: a3_tb
             x: 140
-            y: 498
+            y: 408
             width: 163
             height: 65
             radius: 8
@@ -3205,7 +3205,7 @@ lvgl:
         - button:
             id: a3d0
             x: 318
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3224,7 +3224,7 @@ lvgl:
         - button:
             id: a3d1
             x: 373
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3243,7 +3243,7 @@ lvgl:
         - button:
             id: a3d2
             x: 428
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3262,7 +3262,7 @@ lvgl:
         - button:
             id: a3d3
             x: 483
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3281,7 +3281,7 @@ lvgl:
         - button:
             id: a3d4
             x: 538
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3300,7 +3300,7 @@ lvgl:
         - button:
             id: a3d5
             x: 593
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3319,7 +3319,7 @@ lvgl:
         - button:
             id: a3d6
             x: 648
-            y: 503
+            y: 413
             width: 50
             height: 55
             radius: 8
@@ -3338,7 +3338,7 @@ lvgl:
         - dropdown:
             id: a3_dd
             x: 710
-            y: 503
+            y: 413
             width: 265
             height: 55
             text_font: font_small
@@ -3369,6 +3369,49 @@ lvgl:
                   call.set_value(id(spk_ids)[i]);
                   call.perform();
         # ===== 時間選擇覆蓋層(點列上的時間開啟,預設隱藏;al_edit=編輯中的鬧鐘)=====
+        # ===== 時區設定(鬧鐘列壓縮後騰出的底部空間;呼應喇叭下拉的視覺)=====
+        - label: { x: 25, y: 495, text: "TIMEZONE", text_font: font_tiny, text_color: 0x9AE6B4 }
+        - dropdown:
+            id: tz_dd
+            x: 25
+            y: 525
+            width: 375
+            height: 55
+            text_font: font_small
+            text_color: 0x9AE6B4
+            bg_color: 0x0A2416
+            border_width: 1
+            border_color: 0x006030
+            dropdown_list:
+              bg_color: 0x0A2416
+              text_color: 0x9AE6B4
+              text_font: font_small
+              border_width: 1
+              border_color: 0x006030
+              radius: 8
+              selected:
+                bg_color: 0x00C060
+                text_color: 0x04180C
+            # 顯示名的 index 必須對齊 radar_bg::tz_posix() 的 POSIX 陣列
+            options:
+              - "TAIPEI"
+              - "TOKYO"
+              - "SHANGHAI"
+              - "HONG KONG"
+              - "SEOUL"
+              - "BANGKOK"
+              - "LONDON"
+              - "PARIS"
+              - "BERLIN"
+              - "NEW YORK"
+              - "LOS ANGELES"
+              - "UTC"
+            on_value:
+              - lambda: |-
+                  int i = (int) x;
+                  if (i == id(tz_sel)) return;          // set_selected_index 會回打,值沒變就跳過
+                  id(tz_sel) = i;
+                  id(rtc_time).set_timezone(radar_bg::tz_posix(i));
         - obj:
             id: tp_overlay
             x: 263
@@ -3432,7 +3475,7 @@ lvgl:
                     - script.execute: alarm_refresh
               - button:
                   x: 45
-                  y: 370
+                  y: 310
                   width: 363
                   height: 65
                   radius: 10

@@ -611,6 +611,27 @@ inline std::string route_cache_get(const std::string &cs) {
   return "";
 }
 
+// ---- 時區:下拉選單 index → POSIX TZ 字串(供 time.set_timezone 執行期切換)----
+// 顯示名清單在 ui/ 的 dropdown options,兩邊 index 必須對齊。
+inline const char *tz_posix(int i) {
+  static const char *const T[] = {
+      "CST-8",                            // 0 Taipei
+      "JST-9",                            // 1 Tokyo
+      "CST-8",                            // 2 Shanghai
+      "HKT-8",                            // 3 Hong Kong
+      "KST-9",                            // 4 Seoul
+      "ICT-7",                            // 5 Bangkok
+      "GMT0BST,M3.5.0/1,M10.5.0",         // 6 London
+      "CET-1CEST,M3.5.0,M10.5.0/3",       // 7 Paris
+      "CET-1CEST,M3.5.0,M10.5.0/3",       // 8 Berlin
+      "EST5EDT,M3.2.0,M11.1.0",           // 9 New York
+      "PST8PDT,M3.2.0,M11.1.0",           // 10 Los Angeles
+      "UTC0",                             // 11 UTC
+  };
+  const int n = sizeof(T) / sizeof(T[0]);
+  return (i >= 0 && i < n) ? T[i] : T[0];
+}
+
 }  // namespace radar_bg
 
 // ---- 底圖層:底色+輪廓(快取)+ 預混合回波 + 距離環/十字線 → 單一不透明 canvas ----

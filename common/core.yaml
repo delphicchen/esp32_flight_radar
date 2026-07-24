@@ -26,8 +26,11 @@ esphome:
       - lambda: |-
           // 開機重建底圖(map_on/echo_on 已自 NVS 還原),同時蓋掉 PSRAM 未初始化雜訊
           // 喇叭下拉選單:字型無 FontAwesome 箭頭字形(U+F078),移除符號免警告
-          LvDropdownType *dds[5] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd) };
+          LvDropdownType *dds[6] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd), id(tz_dd) };
           for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
+          // 還原時區:NVS 的 index → POSIX TZ 執行期套用,並把下拉同步到該項
+          id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
+          lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           // 鎖定所有頁面的捲動:避免三指截圖手勢把頁面拖出位移,截到偏移後的內容
           lv_obj_t *pgs[4] = { id(main_page)->obj, id(alarm_page)->obj,
                                id(config_page)->obj, id(settings_page)->obj };
@@ -346,6 +349,7 @@ globals:
   - { id: atc_apt_on, type: bool, restore_value: true, initial_value: 'true' }   # 機場
   - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
   - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
+  - { id: tz_sel, type: int, restore_value: true, initial_value: '0' }             # 時區下拉選擇(index，對齊 tz_posix)
   # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
   - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
   - { id: trail_lon, type: 'std::vector<float>' }
