@@ -20,5 +20,5 @@ substitutions:
 
 packages:
   core:  !include common/core.yaml
-  board: !include boards/esp32s3_rgb_1024x600.yaml
+  board: !include boards/waveshare_esp32s3_rgb_1024x600.yaml
   ui:    !include ui/ui_1024x600.yaml
