@@ -91,7 +91,7 @@ and set `radar_canvas`/font sizes to match.
 
 ### Software requirements
 
-- [ESPHome](https://esphome.io/) 2025.7 or newer (`pip install esphome`)
+- **[ESPHome](https://esphome.io/) 2026.3.x is recommended** (`pip install esphome==2026.3.*`). The firmware calls the LVGL **v8** canvas draw API directly, so it does **not** build on 2026.4.0+ (which switched to LVGL v9) — see issue #5. The 1024×600 boards additionally need the `mipi_rgb` / `mipi_dsi` drivers added in 2025.9.0, so their working range is **2025.9 – 2026.3** (2026.3.x covers all three boards). The original 800×480 `radar.yaml` works on any ≤ 2026.3.x.
 - The dependency `pngle` is pulled in automatically via `platformio_options`.
 
 ### Flashing
@@ -313,7 +313,7 @@ JC8048W550…)照 `boards/esp32s3_rgb_800x480.yaml` 對腳位即可用 `radar.ya
 
 ### 軟體需求
 
-- [ESPHome](https://esphome.io/) 2025.7 以上(`pip install esphome`)
+- **建議 [ESPHome](https://esphome.io/) 2026.3.x**(`pip install esphome==2026.3.*`)。韌體直接呼叫 LVGL **v8** canvas 繪圖 API,故 **無法**在 2026.4.0+(改用 LVGL v9)編譯——見 issue #5。兩塊 1024×600 板另需 2025.9.0 才加入的 `mipi_rgb` / `mipi_dsi` 驅動,可用範圍為 **2025.9 – 2026.3**(2026.3.x 三塊板全涵蓋)。原始 800×480 `radar.yaml` 在任何 ≤2026.3.x 皆可。
 - 相依的 `pngle` 會由 `platformio_options` 自動安裝。
 
 ### 燒錄

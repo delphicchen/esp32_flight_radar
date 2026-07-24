@@ -123,6 +123,9 @@ touchscreen:
       - lambda: 'id(shot_armed) = false;'
 
 # ---- Display (parallel RGB, driven by LVGL) ----
+# NOTE: this board needs the `mipi_rgb` driver, added in ESPHome 2025.9.0.
+# Combined with the project-wide LVGL-v8 requirement (<= 2026.3.x, see README),
+# build this board with ESPHome in the 2025.9 – 2026.3 range (2026.3.x recommended).
 # Uses the newer `mipi_rgb` driver + ESPHome's built-in Waveshare panel model,
 # which carries the RGB pins (DE5/HSYNC46/VSYNC3/PCLK7 + data pins), the CH422G
 # reset(EXIO3)/enable(EXIO2) pins and the official 1024x600 timings. Unlike
