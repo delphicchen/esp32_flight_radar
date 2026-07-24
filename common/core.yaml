@@ -73,6 +73,11 @@ esphome:
             lv_obj_add_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(poff_btn_l), lv_color_hex(0x04180C), 0);
           }
+          if (id(units_imperial)) {
+            lv_obj_add_state((lv_obj_t *) id(units_btn), LV_STATE_CHECKED);
+            lv_label_set_text(id(units_btn_l), "UNITS: IMPERIAL");
+            lv_obj_set_style_text_color(id(units_btn_l), lv_color_hex(0x04180C), 0);
+          }
       - script.execute: atc_panel_sync
       - lvgl.slider.update:
           id: bl_slider
@@ -350,6 +355,7 @@ globals:
   - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
   - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
   - { id: tz_sel, type: int, restore_value: true, initial_value: '0' }             # 時區下拉選擇(index，對齊 tz_posix)
+  - { id: units_imperial, type: bool, restore_value: true, initial_value: 'false' } # 顯示單位:false=公制(°C/km/h/km/m)，true=英制(°F/mph/mi/ft)
   # ATC 模式:方塊+向量線+軌跡尾跡+STCA 衝突告警用的狀態
   - { id: trail_lat, type: 'std::vector<float>' }   # 10 槽 x 3 筆歷史,索引 slot*3+k
   - { id: trail_lon, type: 'std::vector<float>' }
@@ -409,13 +415,16 @@ script:
           float brg = atan2f(e, no) * 57.29578f;
           if (brg < 0) brg += 360.0f;
           char b[48];
-          snprintf(b, sizeof(b), "ALT %5.0f m     FL%03.0f", id(ac_alt)[i], id(ac_alt)[i] * 0.032808f);
+          snprintf(b, sizeof(b), id(units_imperial) ? "ALT %5.0f ft    FL%03.0f" : "ALT %5.0f m     FL%03.0f",
+                   id(ac_alt)[i] * (id(units_imperial) ? 3.2808f : 1.0f), id(ac_alt)[i] * 0.032808f);
           lv_label_set_text(id(sel_l1), b);
-          snprintf(b, sizeof(b), "SPD %5.0f km/h  %03.0f kt", id(ac_vel)[i] * 3.6f, id(ac_vel)[i] * 1.9438f);
+          snprintf(b, sizeof(b), id(units_imperial) ? "SPD %5.0f mph   %03.0f kt" : "SPD %5.0f km/h  %03.0f kt",
+                   id(ac_vel)[i] * (id(units_imperial) ? 2.2369f : 3.6f), id(ac_vel)[i] * 1.9438f);
           lv_label_set_text(id(sel_l2), b);
           snprintf(b, sizeof(b), "VS   %+02.1f m/s   TRK %03.0f",  id(ac_vr)[i], id(ac_trk)[i]);
           lv_label_set_text(id(sel_l3), b);
-          snprintf(b, sizeof(b), "DIST %4.0f km    BRG %03.0f", sqrtf(e * e + no * no), brg);
+          snprintf(b, sizeof(b), id(units_imperial) ? "DIST %4.0f mi    BRG %03.0f" : "DIST %4.0f km    BRG %03.0f",
+                   sqrtf(e * e + no * no) * (id(units_imperial) ? 0.6214f : 1.0f), brg);
           lv_label_set_text(id(sel_l4), b);
       - script.execute: fetch_route
       - script.execute: atc_panel_sync   # 選機→藏圖層面板;取消選取→ATC 模式下重新顯示
@@ -445,11 +454,13 @@ script:
           static const char *PTS[16] = { "N","NNE","NE","ENE","E","ESE","SE","SSE",
                                          "S","SSW","SW","WSW","W","WNW","NW","NNW" };
           char b[48];
-          snprintf(b, sizeof(b), "TEMP %6.1f C", radar_bg::g_wx.temp);
+          snprintf(b, sizeof(b), id(units_imperial) ? "TEMP %6.1f F" : "TEMP %6.1f C",
+                   id(units_imperial) ? radar_bg::g_wx.temp * 1.8f + 32.0f : radar_bg::g_wx.temp);
           lv_label_set_text(id(sel_l1), b);
           snprintf(b, sizeof(b), "HUM  %6.0f %%", radar_bg::g_wx.hum);
           lv_label_set_text(id(sel_l2), b);
-          snprintf(b, sizeof(b), "WIND %6.1f km/h", radar_bg::g_wx.wspd);
+          snprintf(b, sizeof(b), id(units_imperial) ? "WIND %6.1f mph" : "WIND %6.1f km/h",
+                   radar_bg::g_wx.wspd * (id(units_imperial) ? 0.6214f : 1.0f));
           lv_label_set_text(id(sel_l3), b);
           float wd = radar_bg::g_wx.wdir;
           if (wd < 0) wd = 0;
@@ -819,17 +830,17 @@ interval:
               float n2 = (id(ac_lat)[si] - lat0) * 110.574f;
               float brg = atan2f(e2, n2) * 57.29578f;
               if (brg < 0) brg += 360.0f;
-              snprintf(b2, sizeof(b2), "ALT %5.0f m     FL %03.0f",
-                       id(ac_alt)[si], id(ac_alt)[si] * 0.032808f);
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "ALT %5.0f ft    FL %03.0f" : "ALT %5.0f m     FL %03.0f",
+                       id(ac_alt)[si] * (id(units_imperial) ? 3.2808f : 1.0f), id(ac_alt)[si] * 0.032808f);
               lv_label_set_text(id(sel_l1), b2);
-              snprintf(b2, sizeof(b2), "SPD %5.0f km/h  %3.0f kt",
-                       id(ac_vel)[si] * 3.6f, id(ac_vel)[si] * 1.9438f);
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "SPD %5.0f mph   %3.0f kt" : "SPD %5.0f km/h  %3.0f kt",
+                       id(ac_vel)[si] * (id(units_imperial) ? 2.2369f : 3.6f), id(ac_vel)[si] * 1.9438f);
               lv_label_set_text(id(sel_l2), b2);
               snprintf(b2, sizeof(b2), "VS   %+02.1f m/s   TRK %03.0f",
                        id(ac_vr)[si], id(ac_trk)[si]);
               lv_label_set_text(id(sel_l3), b2);
-              snprintf(b2, sizeof(b2), "DIST %4.0f km    BRG %03.0f",
-                       sqrtf(e2 * e2 + n2 * n2), brg);
+              snprintf(b2, sizeof(b2), id(units_imperial) ? "DIST %4.0f mi    BRG %03.0f" : "DIST %4.0f km    BRG %03.0f",
+                       sqrtf(e2 * e2 + n2 * n2) * (id(units_imperial) ? 0.6214f : 1.0f), brg);
               lv_label_set_text(id(sel_l4), b2);
             } else {
               lv_label_set_text(id(sel_l1), "(out of range)");
@@ -1138,8 +1149,8 @@ interval:
           id: coords_label
           text: !lambda |-
             char buf[48];
-            snprintf(buf, sizeof(buf), "%.4fN  %.4fE  R%.0fkm",
-                     id(home_lat).state, id(home_lon).state, id(radar_range).state);
+            snprintf(buf, sizeof(buf), id(units_imperial) ? "%.4fN  %.4fE  R%.0fmi" : "%.4fN  %.4fE  R%.0fkm",
+                     id(home_lat).state, id(home_lon).state, id(radar_range).state * (id(units_imperial) ? 0.6214f : 1.0f));
             return std::string(buf);
 
 # =====================================================================

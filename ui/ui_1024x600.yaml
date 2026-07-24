@@ -2080,6 +2080,34 @@ lvgl:
                   id(poll_when_off) = lv_obj_has_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
                   lv_obj_set_style_text_color(id(poff_btn_l),
                       lv_color_hex(id(poll_when_off) ? 0x04180C : 0x00C060), 0);
+        # 顯示單位切換(左下角空位;公制/英制,影響溫度/速度/距離/高度/範圍顯示)
+        - button:
+            id: units_btn
+            x: 38
+            y: 473
+            width: 510
+            height: 55
+            radius: 5
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: units_btn_l
+                  align: CENTER
+                  text: "UNITS: METRIC"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(units_imperial) = lv_obj_has_state((lv_obj_t *) id(units_btn), LV_STATE_CHECKED);
+                  lv_label_set_text(id(units_btn_l), id(units_imperial) ? "UNITS: IMPERIAL" : "UNITS: METRIC");
+                  lv_obj_set_style_text_color(id(units_btn_l),
+                      lv_color_hex(id(units_imperial) ? 0x04180C : 0x00C060), 0);
         # 手搓數字鍵盤(與整體風格一致)
         - button:
             x: 575

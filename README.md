@@ -31,7 +31,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 - **Map outline overlay** — optional coastline / administrative border layer (Taiwan by default), toggle on screen.
 - **Home Assistant integration** — the device auto-discovers in HA; backlight, Wi-Fi signal and buttons become HA entities.
 - **Alarm clock** — up to 4 alarms, each with per-weekday scheduling. Alarms ring through a **Home Assistant media player** (any Wi-Fi speaker); **each alarm can ring on its own speaker** (e.g. weekday alarm in the bedroom, weekend alarm in the living room). On-screen **Snooze / Dismiss** overlay when ringing.
-- **Fully on-device setup** — first boot opens a Wi-Fi captive portal. Coordinates, scan range, poll interval, OpenSky credentials and the alarm speaker can all be entered **on the touch screen** (or via the web page / Home Assistant). Everything is stored in NVS and survives reboots.
+- **Fully on-device setup** — first boot opens a Wi-Fi captive portal. Coordinates, scan range, poll interval, OpenSky credentials and the alarm speaker can all be entered **on the touch screen** (or via the web page / Home Assistant). A **timezone** dropdown (alarm page) and a **metric/imperial units** toggle (settings page — switches °C/°F, km·h/mph, km/mi, m/ft and the range unit) are set on screen too. Everything is stored in NVS and survives reboots.
 - **OTA updates** — after the first USB flash, all future updates are wireless.
 
 ### Hardware
@@ -262,7 +262,7 @@ Please respect each provider's free-tier terms; this project is a hobby build, n
 - **地圖輪廓圖層** — 可選的海岸線 / 行政區界(預設台灣),螢幕按鈕開關。
 - **Home Assistant 整合** — 裝置會自動被 HA 探索;背光、Wi-Fi 訊號與按鈕都成為 HA 實體。
 - **鬧鐘** — 最多 4 組,每組可設定特定星期幾。鬧鐘透過 **Home Assistant 的媒體播放器**(任何 Wi-Fi 喇叭)發聲,且**每組鬧鐘可指定不同喇叭**(例如平日鬧鐘在臥室響、週末鬧鐘在客廳響)。響鈴時螢幕出現**貪睡 / 關閉**面板。
-- **完全在裝置上設定** — 首次開機開啟 Wi-Fi 設定熱點。座標、掃描半徑、輪詢間隔、OpenSky 憑證、鬧鐘喇叭都可以**直接在觸控螢幕上輸入**(也可透過網頁 / Home Assistant)。全部存於 NVS,重開機保留。
+- **完全在裝置上設定** — 首次開機開啟 Wi-Fi 設定熱點。座標、掃描半徑、輪詢間隔、OpenSky 憑證、鬧鐘喇叭都可以**直接在觸控螢幕上輸入**(也可透過網頁 / Home Assistant)。**時區**下拉(鬧鐘頁)與**公制/英制單位**切換(設定頁——切換 °C/°F、km·h/mph、km/mi、m/ft 及範圍單位)也在螢幕上設定。全部存於 NVS,重開機保留。
 - **OTA 無線更新** — 第一次用 USB 燒錄後,之後都能無線更新。
 
 ### 硬體
