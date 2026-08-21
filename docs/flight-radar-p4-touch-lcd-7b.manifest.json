@@ -1,12 +1,12 @@
 {
   "name": "ESP32 Flight Radar (p4-touch-lcd-7b)",
-  "version": "v1.3.5-p4",
+  "version": "v1.3.6-p4",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-P4",
       "parts": [
-        { "path": "firmware/flight-radar-p4-touch-lcd-7b-v1.3.5-p4.factory.bin", "offset": 0 }
+        { "path": "firmware/flight-radar-p4-touch-lcd-7b-v1.3.6-p4.factory.bin", "offset": 0 }
       ]
     }
   ]
