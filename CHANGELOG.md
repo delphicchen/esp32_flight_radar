@@ -3,7 +3,7 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.3.6] — 2026-08-21
 
 ### Fixed
 
