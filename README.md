@@ -98,11 +98,14 @@ git clone https://github.com/delphicchen/esp32_flight_radar
 cd esp32_flight_radar
 # S3 boards -> main branch:
 pip install 'esphome==2026.3.*'
-esphome run radar-s3-5b.yaml       # or radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
+tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 1st flash: USB
+tools/dev_flash.sh radar.yaml                         # afterwards: Wi-Fi OTA
 # P4 board -> lvgl9 branch:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
-ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
+tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 ```
+
+Always flash through `tools/dev_flash.sh`, never a bare `esphome run`: every entry shares one ESPHome device name (`flight-radar`), so a bare run can silently pick up another board's stale image from the shared build dir (this really happened — right backlight, black screen).
 
 First flash must be over **USB**. If it stalls: hold **BOOT**, tap **RESET**, release **BOOT**.
 
@@ -159,11 +162,14 @@ git clone https://github.com/delphicchen/esp32_flight_radar
 cd esp32_flight_radar
 # S3 板 → main 分支:
 pip install 'esphome==2026.3.*'
-esphome run radar-s3-5b.yaml       # 或 radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
+tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 第一次:USB
+tools/dev_flash.sh radar.yaml                          # 之後:Wi-Fi OTA
 # P4 板 → lvgl9 分支:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
-ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
+tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 ```
+
+燒錄一律用 `tools/dev_flash.sh`,不要直接 `esphome run`:五個入口的 ESPHome 裝置名都叫 flight-radar,直接跑可能拿到共用建置目錄裡「別塊板子」的舊映像(實際發生過:背光亮著但畫面全黑)。
 
 第一次必須用 **USB** 燒錄。卡住的話:按住 **BOOT**、點一下 **RESET**、放開 **BOOT**。
 
@@ -218,11 +224,14 @@ git clone https://github.com/delphicchen/esp32_flight_radar
 cd esp32_flight_radar
 # S3 板 → main 分支:
 pip install 'esphome==2026.3.*'
-esphome run radar-s3-5b.yaml       # 或 radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
+tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 第一次:USB
+tools/dev_flash.sh radar.yaml                          # 之後:Wi-Fi OTA
 # P4 板 → lvgl9 分支:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
-ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
+tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 ```
+
+烧录一律用 `tools/dev_flash.sh`,不要直接 `esphome run`:五个入口的 ESPHome 装置名都叫 flight-radar,直接跑可能拿到共用构建目录里「别块板子」的旧映像(实际发生过:背光亮着但画面全黑)。
 
 第一次必须用 **USB** 烧录。卡住的话:按住 **BOOT**、点一下 **RESET**、放开 **BOOT**。
 
