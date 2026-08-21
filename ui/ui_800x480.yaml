@@ -4910,7 +4910,7 @@ lvgl:
                       lv_color_hex(on ? 0x04180C : 0x00C060), 0);
               - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
               - script.execute: atc_panel_sync
-        # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
+        # PWR 鈕:切換螢幕背光(checked=熄滅)
         - button:
             id: pwr_btn
             x: 672
@@ -5149,7 +5149,9 @@ lvgl:
                       id(opensky_client_secret).state.c_str());
                   lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));
               - lvgl.page.show: config_page
- x: 500
+        - label:
+            id: brt_l
+            x: 500
             y: 412
             text: "BRT"
             text_font: font_small
