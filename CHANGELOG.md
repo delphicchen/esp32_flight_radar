@@ -4,7 +4,7 @@ Notable changes per release. Dates are the tag dates; `Unreleased` is what is on
 right now. Anything that changes how you flash or upgrade is called out first, because
 that is the part that costs you time.
 
-## [Unreleased]
+## [v1.3.6] — 2026-08-21
 
 ### Fixed
 
