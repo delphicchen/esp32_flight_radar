@@ -3,6 +3,27 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.7] — 2026-08-22
+
+### Fixed
+
+- **Tapping SYS could trigger PWR instead (Guition & generic 800x480, since v1.2.x).**
+  After the map-tiles merge, late-created layers sat above the toolbar and broke hit
+  testing on its right edge — taps near SYS/PWR landed on the wrong button. The five
+  toolbar buttons are defined contiguously again and re-raised once a second; child
+  labels no longer swallow touches; SYS and PWR get slightly larger extended click
+  areas (12 px / 8 px). By @CaptainJi in #13, with a follow-up repair restoring the
+  `brt_l` label header that the original patch had dropped in both ui packages.
+
+### Added
+
+- **`tools/dev_flash.sh`** for everyday flashing: each entry builds in its own
+  `rel-dev-<entry>` directory and the script refuses to upload unless the C++ source
+  was regenerated during that run. Motivated by a real incident where a bare
+  `esphome upload radar.yaml` picked up another board's stale image from the shared
+  build dir and OTA'd it over Wi-Fi (backlight on, panel black). The README flashing
+  sections no longer suggest a bare `esphome run`.
+
 ## [v1.3.6] — 2026-08-21
 
 ### Fixed
