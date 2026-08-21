@@ -68,6 +68,24 @@ esphome:
             lv_obj_add_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
           }
+          // 工具列置頂:map-tiles 裁剪層/後掛物件會蓋住右上角,SYS 易被 PWR 誤觸
+          {
+            lv_obj_t *tb[] = {
+              (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn),
+              (lv_obj_t *) id(atc_btn), (lv_obj_t *) id(pwr_btn),
+              (lv_obj_t *) id(info_btn),
+            };
+            for (auto *b : tb) {
+              if (!b) continue;
+              lv_obj_move_foreground(b);
+              uint32_t nc = lv_obj_get_child_cnt(b);
+              for (uint32_t i = 0; i < nc; i++)
+                lv_obj_clear_flag(lv_obj_get_child(b, i), LV_OBJ_FLAG_CLICKABLE);
+            }
+            // 右緣 SYS/PWR 略擴熱區,減輕邊緣觸控偏差(不拉伸全局 calibration)
+            lv_obj_set_ext_click_area((lv_obj_t *) id(info_btn), 12);
+            lv_obj_set_ext_click_area((lv_obj_t *) id(pwr_btn), 8);
+          }
           // ATC 圖層開關按鈕:還原 NVS 儲存的勾選狀態
           struct { bool on; lv_obj_t *btn, *lbl; } lay[5] = {
             { id(atc_asp_on), (lv_obj_t *) id(asp_btn), id(asp_btn_l) },
@@ -811,6 +829,17 @@ interval:
       - lambda: |-
           // i 鈕開啟中 → 每秒刷新系統資訊(RAM/PSRAM/運行時間會變)
           if (id(info_on)) id(show_sysinfo).execute();
+          // 工具列每秒置頂一次:航班 mark 顯隱/set_pos 後偶發搶上層,SYS 就點不到
+          {
+            lv_obj_t *tb[] = {
+              (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn),
+              (lv_obj_t *) id(atc_btn), (lv_obj_t *) id(pwr_btn),
+              (lv_obj_t *) id(info_btn),
+            };
+            for (auto *b : tb) {
+              if (b) lv_obj_move_foreground(b);
+            }
+          }
           // 響鈴中 → 每 15 秒重播一次,直到使用者按 DISMISS
           if (id(alarm_ringing) && (millis() - id(ring_last_ms)) >= 15000) {
             id(ring_last_ms) = millis();

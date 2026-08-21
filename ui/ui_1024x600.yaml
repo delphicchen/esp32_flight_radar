@@ -4824,7 +4824,9 @@ lvgl:
             line_width: 3
 
         # ===== 右:資訊欄 =====
-        # MAP / ECHO 文字切換鈕(啟用=反白)
+        # MAP / ECHO / ATC / PWR / SYS 文字切換鈕(啟用=反白)
+        # 五鈕須連續定義。勿把 PWR 提前、SYS/ATC 放到 status_label 之後 ——
+        # 合併 map-tiles 後裁剪層/後掛物件會打亂命中,表現為點 SYS 卻觸發 PWR。
         - button:
             id: map_btn
             x: 619
@@ -4882,6 +4884,37 @@ lvgl:
                       lv_color_hex(on ? 0x04180C : 0x00C060), 0);
                   id(rebuild_base).execute();   // 有舊回波幀就立即疊回顯示
                   if (on) id(echo_refresh).execute();   // 並排一次新抓取
+        # ATC 鈕:切換雷達顯示為 ATC 模式(方塊目標點/速度向量線/歷史軌跡/STCA 衝突告警)
+        - button:
+            id: atc_btn
+            x: 766
+            y: 193
+            width: 70
+            height: 40
+            radius: 5
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: atc_btn_l
+                  align: CENTER
+                  text: "ATC"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
+                  id(atc_on) = on;
+                  lv_obj_set_style_text_color(id(atc_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+              - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
+              - script.execute: atc_panel_sync
+        # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
         - button:
             id: pwr_btn
             x: 840
@@ -4921,6 +4954,58 @@ lvgl:
                     auto call = id(backlight).turn_off();
                     call.perform();
                   }
+        # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
+        - button:
+            id: info_btn
+            x: 914
+            y: 193
+            width: 70
+            height: 40
+            radius: 5
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: info_btn_l
+                  align: CENTER
+                  text: "SYS"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  bool on = lv_obj_has_state((lv_obj_t *) id(info_btn), LV_STATE_CHECKED);
+                  id(info_on) = on;
+                  lv_obj_set_style_text_color(id(info_btn_l),
+                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+                  if (on) {
+                    id(show_sysinfo).execute();
+                  } else if (id(sel_cs_g).empty()) {
+                    id(show_weather).execute();
+                  } else {
+                    // 恢復選取中航班:標頭先回填,詳情待下輪資料,航線重查
+                    lv_label_set_text(id(sel_cs_l), id(sel_cs_g).c_str());
+                    lv_label_set_text(id(sel_route_l), "ROUTE ...");
+                    lv_label_set_text(id(sel_l1), "");
+                    lv_label_set_text(id(sel_l2), "");
+                    lv_label_set_text(id(sel_l3), "");
+                    lv_label_set_text(id(sel_l4), "");
+                    id(fetch_route).execute();
+                  }
+              - script.execute: atc_panel_sync
+        # 亮度滑桿(僅 SYS 選單顯示,amber 配色):拖動即時調背光,存於 light 的 NVS 狀態
+        #
+        # 右下面板的垂直預算(font_mono=18 行高 24、font_small=22 行高 26):
+        #   sel_l4  386..409(字身 391..404)  ← 最後一行天氣/系統資訊
+        #   atc_panel 200..409(height 210)   ← 不透明,必須完整蓋住 sel_l4
+        #   BRT 列  412..438(字身 417..432;滑桿軌 420..429、旋鈕 416..433)
+        #   status_label 446..469(字身 451..467)
+        # 原本 BRT 在 406、面板只到 400,結果 sel_l4 的下半截從面板下緣露出來、
+        # 又跟 BRT/滑桿疊在一起(截圖可見)。改動任一項都要重算這四段。
         - label:
             id: wifi_icon
             x: 953
@@ -5068,91 +5153,7 @@ lvgl:
                       id(opensky_client_secret).state.c_str());
                   lv_keyboard_set_textarea(id(cfg_kb)->obj, (lv_obj_t *) id(ta_cid));
               - lvgl.page.show: config_page
-        # ATC 鈕:切換雷達顯示為 ATC 模式(方塊目標點/速度向量線/歷史軌跡/STCA 衝突告警)
-        - button:
-            id: atc_btn
-            x: 766
-            y: 193
-            width: 70
-            height: 40
-            radius: 5
-            checkable: true
-            bg_color: 0x040C08
-            border_width: 1
-            border_color: 0x00A050
-            checked:
-              bg_color: 0x00C060
-              border_color: 0x00C060
-            widgets:
-              - label:
-                  id: atc_btn_l
-                  align: CENTER
-                  text: "ATC"
-                  text_font: font_small
-                  text_color: 0x00C060
-            on_click:
-              - lambda: |-
-                  bool on = lv_obj_has_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
-                  id(atc_on) = on;
-                  lv_obj_set_style_text_color(id(atc_btn_l),
-                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
-              - script.execute: rebuild_base   # 底圖切換 ATC 靜態圖層(空域/跑道/機場/導航點)
-              - script.execute: atc_panel_sync
-        # SYS 鈕:右下面板切換顯示系統資訊(CPU/RAM/PSRAM/FLASH)
-        - button:
-            id: info_btn
-            x: 914
-            y: 193
-            width: 70
-            height: 40
-            radius: 5
-            checkable: true
-            bg_color: 0x040C08
-            border_width: 1
-            border_color: 0x00A050
-            checked:
-              bg_color: 0x00C060
-              border_color: 0x00C060
-            widgets:
-              - label:
-                  id: info_btn_l
-                  align: CENTER
-                  text: "SYS"
-                  text_font: font_small
-                  text_color: 0x00C060
-            on_click:
-              - lambda: |-
-                  bool on = lv_obj_has_state((lv_obj_t *) id(info_btn), LV_STATE_CHECKED);
-                  id(info_on) = on;
-                  lv_obj_set_style_text_color(id(info_btn_l),
-                      lv_color_hex(on ? 0x04180C : 0x00C060), 0);
-                  if (on) {
-                    id(show_sysinfo).execute();
-                  } else if (id(sel_cs_g).empty()) {
-                    id(show_weather).execute();
-                  } else {
-                    // 恢復選取中航班:標頭先回填,詳情待下輪資料,航線重查
-                    lv_label_set_text(id(sel_cs_l), id(sel_cs_g).c_str());
-                    lv_label_set_text(id(sel_route_l), "ROUTE ...");
-                    lv_label_set_text(id(sel_l1), "");
-                    lv_label_set_text(id(sel_l2), "");
-                    lv_label_set_text(id(sel_l3), "");
-                    lv_label_set_text(id(sel_l4), "");
-                    id(fetch_route).execute();
-                  }
-              - script.execute: atc_panel_sync
-        # 亮度滑桿(僅 SYS 選單顯示,amber 配色):拖動即時調背光,存於 light 的 NVS 狀態
-        #
-        # 右下面板的垂直預算(font_mono=18 行高 24、font_small=22 行高 26):
-        #   sel_l4  386..409(字身 391..404)  ← 最後一行天氣/系統資訊
-        #   atc_panel 200..409(height 210)   ← 不透明,必須完整蓋住 sel_l4
-        #   BRT 列  412..438(字身 417..432;滑桿軌 420..429、旋鈕 416..433)
-        #   status_label 446..469(字身 451..467)
-        # 原本 BRT 在 406、面板只到 400,結果 sel_l4 的下半截從面板下緣露出來、
-        # 又跟 BRT/滑桿疊在一起(截圖可見)。改動任一項都要重算這四段。
-        - label:
-            id: brt_l
-            x: 625
+ x: 625
             y: 515
             text: "BRT"
             text_font: font_small
