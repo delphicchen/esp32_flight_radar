@@ -4,6 +4,18 @@ Notable changes per release. Dates are the tag dates; `Unreleased` is what is on
 right now. Anything that changes how you flash or upgrade is called out first, because
 that is the part that costs you time.
 
+## [Unreleased]
+
+### Fixed
+
+- **The MAP status on the SYS page was cut off on 800x480 boards.** v1.3.5 appended
+  `MAP ...` to the FLASH line, but that line runs ~34 characters against a panel that
+  fits ~26 — the screen edge trimmed exactly the part users were asked to read and
+  report (#7). The map status now gets its own line near the top of the panel
+  (reusing the SQUAWK row, which SYS info leaves empty), and the FLASH line keeps
+  just flash and app sizes. Both lines now fit on every board; no layout change,
+  so no reflash-specific notes.
+
 ## [v1.3.5] — 2026-08-20
 
 ### Added

@@ -15,7 +15,7 @@ tools/cache/
 # 編譯時產生的位元組碼,任何深度都不要追蹤
 # (舊規則 components/*/__pycache__/ 只吃一層,漏掉 components/lvgl/widgets/)
 __pycache__/
-.claude/settings.local.json
+.claude/
 .claude/*.tmp.*
 
 # 發佈用的韌體產物(tools/build_release.sh),不進版控
