@@ -527,11 +527,11 @@ script:
     mode: single
     then:
       - lambda: |-
-          radar_show_sysinfo(id(sel_cs_l), id(sel_route_l), id(sel_l1), id(sel_l2),
-                             id(sel_l3), id(sel_l4),
+          radar_show_sysinfo(id(sel_cs_l), id(sel_route_l), id(sel_l5), id(sel_l1),
+                             id(sel_l2), id(sel_l3), id(sel_l4),
                              (int) wifi::global_wifi_component->wifi_rssi());
-          lv_label_set_text(id(sel_l5), "");   // 這面板只用 4 行,清掉航班的 SQUAWK
-          radar_type_badge(id(sel_type_l), "");   // 也隱藏機型徽章(標題列改顯示面板名稱)
+          // sel_l5(SQUAWK 列)由 radar_show_sysinfo 填入 MAP 狀態,不清空
+          radar_type_badge(id(sel_type_l), "");   // 隱藏機型徽章(標題列改顯示面板名稱)
 
   - id: show_weather           # 無選取航班時,右下角面板顯示在地天氣(Open-Meteo)
     mode: single

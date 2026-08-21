@@ -1692,14 +1692,31 @@ inline void radar_fill_spec(lv_obj_t *img, lv_obj_t *l0, lv_obj_t *l1, lv_obj_t 
   radar_sil_set(img, sil, s ? s->span_dm : 0);
 }
 
-// ---- 系統資訊(SYS 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 / API 額度 填入右下角六個 label ----
-inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
-                               lv_obj_t *l2, lv_obj_t *l3, lv_obj_t *l4, int rssi) {
+// ---- 系統資訊(SYS 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 / API 額度 填入右下角 label ----
+// sq(SQUAWK 列)在系統資訊模式下挪給 MAP 狀態專用:800x480 右下面板只有
+// 292px 寬(font_mono 一字 11.3px ≈ 26 字),「FLASH .. APP .. MAP ..」塞同一行
+// 會被螢幕右緣切掉——切掉的偏偏就是要使用者回報的 MAP 欄位(issue #7)。
+// 拆成兩行後各 ≤ 24 字都放得下,且 MAP 提到第二列更醒目。
+inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
+                               lv_obj_t *l1, lv_obj_t *l2, lv_obj_t *l3,
+                               lv_obj_t *l4, int rssi) {
   char b[48];
   lv_label_set_text(cs, "SYSTEM");
   snprintf(b, sizeof(b), "ESP32-S3 %uMHz   RSSI %d",
            (unsigned) esp_rom_get_cpu_ticks_per_us(), rssi);
   lv_label_set_text(route, b);
+  // 地圖狀態:**這是使用者唯一看得到它的地方**。Guition 那塊板的 I2C 佔用
+  // GPIO19/20(原生 USB 資料腳),app 一啟動 USB serial 就死,拿不到開機 log;
+  // 而地圖在 Wi-Fi 之前就載入,web UI 的 log 也接不到。沒有這一行,「地圖不顯示」
+  // 只能靠猜是下載、儲存還是繪製出問題(issue #7)。
+  //   MAP 2t 3075p = 2 張圖磚、3075 個輪廓點 → 資料在,問題在繪製
+  //   MAP none     = 分割區裡沒有有效地圖 → 問題在下載或儲存
+  if (maptiles::loaded)
+    snprintf(b, sizeof(b), "MAP %dt %up",
+             maptiles::stored_tiles, (unsigned) (maptiles::OUTLINE.size() / 2));
+  else
+    snprintf(b, sizeof(b), "MAP none");
+  lv_label_set_text(sq, b);
   snprintf(b, sizeof(b), "RAM   %4u / %4u KB",
            (unsigned) (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
            (unsigned) (heap_caps_get_total_size(MALLOC_CAP_INTERNAL) / 1024));
@@ -1711,19 +1728,8 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *l1,
   uint32_t fsz = 0;
   esp_flash_get_size(nullptr, &fsz);
   const esp_partition_t *ap = esp_ota_get_running_partition();
-  // 地圖狀態也放這裡:同樣是儲存相關,而且**這是使用者唯一看得到它的地方**。
-  // Guition 那塊板的 I2C 佔用 GPIO19/20(原生 USB 資料腳),app 一啟動 USB serial
-  // 就死,拿不到開機 log;而地圖在 Wi-Fi 之前就載入,web UI 的 log 也接不到。
-  // 沒有這一行,「地圖不顯示」只能靠猜是下載、儲存還是繪製出問題(issue #7)。
-  //   MAP 2t 3075p = 2 張圖磚、3075 個輪廓點 → 資料在,問題在繪製
-  //   MAP none     = 分割區裡沒有有效地圖 → 問題在下載或儲存
-  if (maptiles::loaded)
-    snprintf(b, sizeof(b), "FLASH %u MB  APP %.1f MB  MAP %dt %up",
-             (unsigned) (fsz >> 20), ap ? ap->size / 1048576.0f : 0.0f,
-             maptiles::stored_tiles, (unsigned) (maptiles::OUTLINE.size() / 2));
-  else
-    snprintf(b, sizeof(b), "FLASH %u MB  APP %.1f MB  MAP none",
-             (unsigned) (fsz >> 20), ap ? ap->size / 1048576.0f : 0.0f);
+  snprintf(b, sizeof(b), "FLASH %u MB  APP %.1f MB",
+           (unsigned) (fsz >> 20), ap ? ap->size / 1048576.0f : 0.0f);
   lv_label_set_text(l3, b);
   uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
   if (radar_bg::g_last_src > 0)   // 免費來源(手選或 fallback):無額度,顯示來源名
