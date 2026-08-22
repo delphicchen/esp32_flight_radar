@@ -1,12 +1,12 @@
 {
   "name": "ESP32 Flight Radar (s3-800x480-generic)",
-  "version": "v1.3.6",
+  "version": "v1.3.7",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        { "path": "firmware/flight-radar-s3-800x480-generic-v1.3.6.factory.bin", "offset": 0 }
+        { "path": "firmware/flight-radar-s3-800x480-generic-v1.3.7.factory.bin", "offset": 0 }
       ]
     }
   ]
