@@ -19,6 +19,9 @@ substitutions:
   f_clock: "80"
   f_mono: "23"
   f_tiny: "18"
+  # 自建含省界/市界的圖磚後可覆寫,例如:
+  # maps_base_url: "https://<you>.github.io/flight-radar-maps/v1"
+  # 未設定時沿用 common/core.yaml 的官方 CDN(通常只有海岸+國界)。
 
 packages:
   core:  !include common/core.yaml

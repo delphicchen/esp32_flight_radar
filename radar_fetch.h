@@ -136,7 +136,7 @@ struct Job {
              // 8 = 下載地圖圖磚
   std::string cid, sec, callsign;
   float lat, lon, range;
-  int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
+  int src;   // 0=OpenSky 1=A.LIVE 2=ADSB.LOL 3=ADSB.FI 4=MERGE(多源合併)
 };
 
 // ---- task → main 的結果(g_states_ready/g_route_ready 當柵欄)----
@@ -169,7 +169,19 @@ inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token
 inline volatile int g_os_remaining = -1;   // OpenSky X-Rate-Limit-Remaining(-1=未知)
 inline bool g_want_rl = false;             // 只在 states 請求期間擷取(bg task 序列執行,無競態)
 inline volatile uint32_t g_os_cooldown_until = 0;  // OpenSky 失敗冷卻期限(millis 秒),期間走免費來源
-inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(0/1/2,-1=尚未成功)
+inline volatile uint32_t g_alive_cooldown_until = 0;  // airplanes.live 403/失敗後冷卻(秒)
+inline volatile int g_last_src = -1;       // 最近成功來源:0..4,-1=尚未;MERGE 時為 4
+
+inline const char *src_name(int src) {
+  switch (src) {
+    case 1: return "A.LIVE";
+    case 2: return "ADSB.LOL";
+    case 3: return "ADSB.FI";
+    case 4: return "MERGE";
+    case 0: return "OPENSKY";
+    default: return "----";
+  }
+}
 
 // HTTP body 上限。150KB 太緊:250km 半徑在繁忙空域(英國、日本)的航班清單就會
 // 超過,回應被截斷後解析必定失敗。字串配在 PSRAM,384KB 對 8MB PSRAM 綽綽有餘,
@@ -297,8 +309,48 @@ inline bool ensure_token(const Job &j) {
   return true;
 }
 
-inline bool do_states_opensky(const Job &j) {
-  if (!ensure_token(j)) return false;
+inline void publish_states(std::vector<AcInfo> &&acs, int src) {
+  std::sort(acs.begin(), acs.end(),
+            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_result = std::move(acs);
+  g_states_ready = true;
+  g_last_src = src;
+  xSemaphoreGive(mtx());
+}
+
+// 依 ICAO24(hex)優先、否則呼號+近距離 合併;較新/較完整的欄位覆蓋空欄
+inline void merge_into(std::vector<AcInfo> &dst, std::vector<AcInfo> &&src) {
+  for (auto &a : src) {
+    int found = -1;
+    for (size_t i = 0; i < dst.size(); i++) {
+      if (a.hex != 0 && dst[i].hex != 0 && a.hex == dst[i].hex) { found = (int) i; break; }
+      if (!a.cs.empty() && a.cs != "?" && a.cs == dst[i].cs) {
+        float dlat = a.lat - dst[i].lat, dlon = a.lon - dst[i].lon;
+        if (dlat * dlat + dlon * dlon < 0.02f * 0.02f) { found = (int) i; break; }
+      }
+    }
+    if (found < 0) { dst.push_back(std::move(a)); continue; }
+    AcInfo &t = dst[(size_t) found];
+    bool newer = a.lc >= t.lc;
+    if (newer) {
+      t.lat = a.lat; t.lon = a.lon; t.trk = a.trk; t.vel = a.vel;
+      t.alt = a.alt; t.vr = a.vr; t.dist = a.dist; t.lc = a.lc;
+    }
+    if (t.hex == 0 && a.hex != 0) t.hex = a.hex;
+    if (t.sq.empty() && !a.sq.empty()) t.sq = std::move(a.sq);
+    if (t.ty.empty() && !a.ty.empty()) t.ty = std::move(a.ty);
+    if (t.reg.empty() && !a.reg.empty()) t.reg = std::move(a.reg);
+    if (t.desc.empty() && !a.desc.empty()) t.desc = std::move(a.desc);
+    if (t.cat.empty() && !a.cat.empty()) t.cat = std::move(a.cat);
+    if ((t.cs.empty() || t.cs == "?") && !a.cs.empty()) t.cs = std::move(a.cs);
+  }
+}
+
+inline bool fetch_opensky(const Job &j, std::vector<AcInfo> &out) {
+  // 有憑證走 OAuth;無憑證改匿名 bbox(額度更緊,但青島一帶常比免費聚合密)
+  const bool want_auth = !j.cid.empty() && !j.sec.empty();
+  if (want_auth && !ensure_token(j)) return false;
   float coslat = cosf(j.lat * 3.14159265f / 180.0f);
   float dlat = j.range / 110.574f;
   float dlon = j.range / (111.320f * coslat);
@@ -307,15 +359,14 @@ inline bool do_states_opensky(const Job &j) {
            "https://opensky-network.org/api/states/all?lamin=%.4f&lomin=%.4f&lamax=%.4f&lomax=%.4f",
            j.lat - dlat, j.lon - dlon, j.lat + dlat, j.lon + dlon);
   int st = 0;
-  g_want_rl = true;
-  std::string r = http_req(url, false, "", nullptr, t_token, st, 131072);
+  g_want_rl = want_auth;
+  std::string r = http_req(url, false, "", nullptr, want_auth ? t_token : "", st, 131072);
   g_want_rl = false;
-  if (st == 401) { t_token.clear(); return false; }   // 下一輪重新換發
+  if (st == 401) { t_token.clear(); return false; }
   if (st != 200 || r.empty()) {
-    ESP_LOGW("radar_bg", "states failed: %d (%u bytes)", st, (unsigned) r.size());
+    ESP_LOGW("radar_bg", "opensky states failed: %d (%u bytes)", st, (unsigned) r.size());
     return false;
   }
-  std::vector<AcInfo> acs;
   float lat0 = j.lat, lon0 = j.lon;
   esphome::json::parse_json(r, [&](JsonObject root) -> bool {
     JsonArray sts = root["states"].as<JsonArray>();
@@ -342,58 +393,45 @@ inline bool do_states_opensky(const Job &j) {
       float e = (alon - lon0) * 111.320f * coslat;
       float n = (alat - lat0) * 110.574f;
       ac.dist = sqrtf(e * e + n * n);
-      acs.push_back(ac);
+      out.push_back(std::move(ac));
     }
     return true;
   });
-  std::sort(acs.begin(), acs.end(),
-            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
-  xSemaphoreTake(mtx(), portMAX_DELAY);
-  g_result = std::move(acs);
-  g_states_ready = true;
-  g_last_src = 0;
-  xSemaphoreGive(mtx());
   return true;
 }
 
-// airplanes.live / adsb.lol(readsb /v2/point,免金鑰):回傳英制,這裡換算回公制
-// 使 UI/ATC 端與 OpenSky 完全同構;lc 由 now(epoch ms)- seen 還原成 last_contact
-inline bool do_states_v2(const Job &j, int src) {
-  float r_nm = j.range / 1.852f;
-  if (r_nm > 250.0f) r_nm = 250.0f;   // v2 API 半徑上限 250 nm(463 km)
-  char url[160];
-  snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f",
-           src == 2 ? "api.adsb.lol" : "api.airplanes.live", j.lat, j.lon, r_nm);
+// readsb 相容 /v2/point 或 adsb.fi /v3/lat/.../dist/...
+inline bool fetch_readsb_json(const std::string &url, float lat0, float lon0, float /*range*/,
+                              std::vector<AcInfo> &out) {
   int st = 0;
   std::string r = http_req(url, false, "", nullptr, "", st, 131072);
   if (st != 200 || r.empty()) {
-    ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
+    ESP_LOGW("radar_bg", "readsb failed %d (%u) %s", st, (unsigned) r.size(), url.c_str());
     return false;
   }
-  std::vector<AcInfo> acs;
-  float lat0 = j.lat, lon0 = j.lon;
-  float coslat = cosf(j.lat * 3.14159265f / 180.0f);
+  float coslat = cosf(lat0 * 3.14159265f / 180.0f);
   esphome::json::parse_json(r, [&](JsonObject root) -> bool {
     uint32_t now_s = (uint32_t) ((root["now"] | 0.0) / 1000.0);
+    if (now_s == 0) now_s = (uint32_t) (millis() / 1000);  // 部分源 now 單位不同時的後備
     JsonArray arr = root["ac"].as<JsonArray>();
     if (arr.isNull()) return true;
     for (JsonVariant v : arr) {
       JsonObject a = v.as<JsonObject>();
       if (a.isNull()) continue;
-      if (a["alt_baro"].is<const char *>()) continue;   // "ground" = 地面,跳過
+      if (a["alt_baro"].is<const char *>()) continue;   // "ground"
       float alat = a["lat"] | NAN, alon = a["lon"] | NAN;
       if (isnan(alat) || isnan(alon)) continue;
       AcInfo ac;
       ac.lat = alat; ac.lon = alon;
-      ac.alt = (a["alt_baro"] | 0.0f) * 0.3048f;    // ft → m
-      ac.vel = (a["gs"] | 0.0f) * 0.514444f;        // kt → m/s
+      ac.alt = (a["alt_baro"] | 0.0f) * 0.3048f;
+      ac.vel = (a["gs"] | 0.0f) * 0.514444f;
       ac.trk = a["track"] | 0.0f;
-      ac.vr  = (a["baro_rate"] | 0.0f) * 0.00508f;  // ft/min → m/s
+      ac.vr  = (a["baro_rate"] | 0.0f) * 0.00508f;
       float seen = a["seen"] | 0.0f;
       ac.lc = now_s > (uint32_t) seen ? now_s - (uint32_t) seen : 0;
       ac.sq = a["squawk"] | "";
-      ac.ty = a["t"] | "";     // ICAO 機型代碼
-      ac.reg = a["r"] | "";    // 註冊號
+      ac.ty = a["t"] | "";
+      ac.reg = a["r"] | "";
       ac.desc = a["desc"] | "";
       ac.cat = a["category"] | "";
       ac.hex = (uint32_t) strtoul(a["hex"] | "0", nullptr, 16);
@@ -404,33 +442,102 @@ inline bool do_states_v2(const Job &j, int src) {
       float e = (alon - lon0) * 111.320f * coslat;
       float n = (alat - lat0) * 110.574f;
       ac.dist = sqrtf(e * e + n * n);
-      acs.push_back(ac);
+      out.push_back(std::move(ac));
     }
     return true;
   });
-  std::sort(acs.begin(), acs.end(),
-            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
-  xSemaphoreTake(mtx(), portMAX_DELAY);
-  g_result = std::move(acs);
-  g_states_ready = true;
-  g_last_src = src;
-  xSemaphoreGive(mtx());
   return true;
 }
 
+inline bool fetch_v2_host(const Job &j, const char *host, std::vector<AcInfo> &out) {
+  float r_nm = j.range / 1.852f;
+  if (r_nm > 250.0f) r_nm = 250.0f;
+  char url[160];
+  snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f", host, j.lat, j.lon, r_nm);
+  return fetch_readsb_json(url, j.lat, j.lon, j.range, out);
+}
+
+// airplanes.live 常對本機 UA 回 403;失敗後冷卻,避免每輪白打
+inline bool fetch_airplanes_live(const Job &j, std::vector<AcInfo> &out) {
+  uint32_t now = millis() / 1000;
+  if (now < g_alive_cooldown_until) return false;
+  if (fetch_v2_host(j, "api.airplanes.live", out)) {
+    g_alive_cooldown_until = 0;
+    return true;
+  }
+  g_alive_cooldown_until = now + 60;  // 1 分鐘
+  ESP_LOGW("radar_bg", "airplanes.live cooling down 60s");
+  return false;
+}
+
+inline bool fetch_adsb_fi(const Job &j, std::vector<AcInfo> &out) {
+  float r_nm = j.range / 1.852f;
+  if (r_nm > 250.0f) r_nm = 250.0f;
+  char url[192];
+  snprintf(url, sizeof(url),
+           "https://opendata.adsb.fi/api/v3/lat/%.4f/lon/%.4f/dist/%.0f",
+           j.lat, j.lon, r_nm);
+  return fetch_readsb_json(url, j.lat, j.lon, j.range, out);
+}
+
+inline bool do_states_opensky(const Job &j) {
+  std::vector<AcInfo> acs;
+  if (!fetch_opensky(j, acs)) return false;
+  publish_states(std::move(acs), 0);
+  return true;
+}
+
+inline bool do_states_v2(const Job &j, int src) {
+  std::vector<AcInfo> acs;
+  bool ok = false;
+  if (src == 3) ok = fetch_adsb_fi(j, acs);
+  else if (src == 2) ok = fetch_v2_host(j, "api.adsb.lol", acs);
+  else {
+    ok = fetch_airplanes_live(j, acs);
+    if (!ok) ok = fetch_v2_host(j, "api.adsb.lol", acs);  // A.LIVE 冷卻/失敗 → LOL
+    if (ok && src == 1) src = 2;
+  }
+  if (!ok) return false;
+  publish_states(std::move(acs), src);
+  return true;
+}
+
+// 多源合併:OpenSky(可匿名)+ADSB.LOL+ADSB.FI(+A.LIVE 未冷卻時),按 hex 去重補欄
+inline void do_states_merge(const Job &j) {
+  std::vector<AcInfo> all;
+  std::vector<AcInfo> part;
+  int ok_n = 0;
+  part.clear();
+  if (fetch_opensky(j, part)) { merge_into(all, std::move(part)); ok_n++; }
+  part.clear();
+  if (fetch_v2_host(j, "api.adsb.lol", part)) { merge_into(all, std::move(part)); ok_n++; }
+  part.clear();
+  if (fetch_adsb_fi(j, part)) { merge_into(all, std::move(part)); ok_n++; }
+  part.clear();
+  if (fetch_airplanes_live(j, part)) { merge_into(all, std::move(part)); ok_n++; }
+  if (ok_n == 0) {
+    ESP_LOGW("radar_bg", "merge: all sources failed");
+    return;
+  }
+  ESP_LOGI("radar_bg", "merge: %d sources ok, %u aircraft", ok_n, (unsigned) all.size());
+  publish_states(std::move(all), 4);
+}
+
 inline void do_states(const Job &j) {
-  if (j.src == 1 || j.src == 2) { do_states_v2(j, j.src); return; }
-  // OpenSky 主線:冷卻中直接走免費來源;失敗設 10 分鐘冷卻,到期自動回試
+  if (j.src == 4) { do_states_merge(j); return; }
+  if (j.src == 1 || j.src == 2 || j.src == 3) { do_states_v2(j, j.src); return; }
+  // OpenSky 主線:冷卻中直接走合併免費源;失敗設 10 分鐘冷卻
   uint32_t now = millis() / 1000;
   if (now >= g_os_cooldown_until) {
     if (do_states_opensky(j)) { g_os_cooldown_until = 0; return; }
     g_os_cooldown_until = now + 600;
-    ESP_LOGW("radar_bg", "opensky failed, fallback to free sources for 600s");
+    ESP_LOGW("radar_bg", "opensky failed, fallback merge for 600s");
   }
   // adsb.lol 先試,airplanes.live 當第二順位:後者自 2026-08-13 起關閉公開 API,
   // 對所有人一律 403(不是我們被封)。原本的順序等於每一輪都先浪費一次必定失敗
   // 的 TLS 連線,才輪到真正能用的來源 —— 也讓 adsb.lol 更容易撞到它的速率限制。
   // 保留它當第二順位:如果哪天恢復開放,不必改碼就會自己回來。
+  // airplanes.live 路徑仍走 fetch_airplanes_live() 的 g_alive_cooldown_until。
   if (!do_states_v2(j, 2)) do_states_v2(j, 1);   // adsb.lol → airplanes.live
 }
 
@@ -714,7 +821,13 @@ inline void do_echo(const Job &j) {
 // ---- 地圖圖磚下載(job 8)-------------------------------------------------
 // 圖磚在 flight-radar-maps 這個 repo,由 GitHub Pages 供應,10 度一格。
 // 詳見 PLAN_MAPTILES.md 與該 repo 的 README。
-inline const char MAPS_BASE[] = "https://delphicchen.github.io/flight-radar-maps/v1";
+inline const char MAPS_BASE[] =
+#ifndef RADAR_MAPS_BASE
+    "https://delphicchen.github.io/flight-radar-maps/v1"
+#else
+    RADAR_MAPS_BASE
+#endif
+    ;
 
 inline volatile bool g_maps_ready = false;   // true=分割區有新地圖待主迴圈載入
 inline volatile bool g_maps_busy = false;
@@ -993,6 +1106,95 @@ inline uint8_t atc_layer_mask(bool atc, bool asp, bool rwy, bool apt, bool fix) 
   return atc ? (uint8_t) ((asp ? 1 : 0) | (rwy ? 2 : 0) | (apt ? 4 : 0) | (fix ? 8 : 0)) : 0;
 }
 
+// 航班標記/向量/軌跡本來掛在整頁上,標籤會畫出雷達圓溢到下方控制列。
+// 建一個與底圖對齊的圓形裁剪層,把它們掛進去;座標改用 RADAR_CX(層内原點)。
+inline void radar_install_ac_clip(lv_obj_t *page, lv_obj_t *marks[], lv_obj_t *vecs[],
+                                  lv_obj_t *trs[][6]) {
+  static bool done = false;
+  if (done || !page) return;
+  lv_obj_t *clip = lv_obj_create(page);
+  lv_obj_remove_style_all(clip);
+  lv_obj_set_pos(clip, RS(12), RS(12));
+  lv_obj_set_size(clip, RADAR_CANVAS, RADAR_CANVAS);
+  lv_obj_set_style_bg_opa(clip, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(clip, 0, 0);
+  lv_obj_set_style_pad_all(clip, 0, 0);
+  lv_obj_set_style_radius(clip, RADAR_CANVAS / 2, 0);
+  lv_obj_set_style_clip_corner(clip, true, 0);
+  lv_obj_clear_flag(clip, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(clip, LV_OBJ_FLAG_CLICKABLE);
+  for (int i = 0; i < AC_SLOTS; i++) {
+    if (marks[i]) lv_obj_set_parent(marks[i], clip);
+    if (vecs[i]) lv_obj_set_parent(vecs[i], clip);
+    for (int k = 0; k < 6; k++)
+      if (trs[i][k]) lv_obj_set_parent(trs[i][k], clip);
+  }
+  done = true;
+}
+
+// ---- 掃描線/尾巴 ----
+// ARGB 自繪在 MIPI 合成下易殘影、外觀差;改回 LVGL line(原扇形餘暉)。
+// 角度用牆鐘錨點:斜線幀變貴時跳格跟上,避免「半圈明顯變慢」。
+inline lv_obj_t *g_sweep_cv = nullptr;
+inline uint32_t *g_sweep_px = nullptr;
+
+inline float radar_sweep_tick(float period_ms, bool lit, float hold_angle,
+                              lv_obj_t *page, lv_obj_t *base, lv_obj_t *lv_lines[5]) {
+  static float a0 = 0.0f;
+  static uint32_t t0 = 0;
+  static float per = -1.0f;
+  static bool anchored = false;
+  uint32_t now = millis();
+  if (!anchored) {
+    a0 = hold_angle;
+    t0 = now;
+    per = period_ms;
+    anchored = true;
+  } else if (fabsf(period_ms - per) > 0.5f) {
+    a0 = fmodf(a0 + (float) (now - t0) / per * 360.0f, 360.0f);
+    if (a0 < 0.0f) a0 += 360.0f;
+    t0 = now;
+    per = period_ms;
+  }
+  float cur = fmodf(a0 + (float) (now - t0) / per * 360.0f, 360.0f);
+  if (cur < 0.0f) cur += 360.0f;
+
+  // 清掉舊版自繪 canvas(若還在),恢復 LVGL 線
+  static bool cleaned = false;
+  if (!cleaned) {
+    if (g_sweep_cv) {
+      lv_obj_del(g_sweep_cv);
+      g_sweep_cv = nullptr;
+    }
+    if (g_sweep_px) {
+      heap_caps_free(g_sweep_px);
+      g_sweep_px = nullptr;
+    }
+    cleaned = true;
+  }
+  (void) page;
+  (void) base;
+
+  if (!lit || !lv_lines) return cur;
+
+  const float DEG = 3.14159265f / 180.0f;
+  static const float TAIL_DEG[5] = { 0.0f, 1.75f, 3.75f, 5.75f, 7.75f };
+  static lv_point_precise_t lp[5][2];
+  static bool lines_shown = false;
+  for (int k = 0; k < 5; k++) {
+    if (!lv_lines[k]) continue;
+    if (!lines_shown) lv_obj_clear_flag(lv_lines[k], LV_OBJ_FLAG_HIDDEN);
+    float a = (cur - TAIL_DEG[k]) * DEG;
+    lp[k][0].x = RS(240);
+    lp[k][0].y = RS(240);
+    lp[k][1].x = RS(240) + (lv_coord_t) ((float) RADAR_R * sinf(a));
+    lp[k][1].y = RS(240) - (lv_coord_t) ((float) RADAR_R * cosf(a));
+    lv_line_set_points(lv_lines[k], lp[k], 2);
+  }
+  lines_shown = true;
+  return cur;
+}
+
 namespace radar_bg {
 
 // LVGL 9 把 canvas 的 lv_canvas_draw_* 全砍掉,改成「開一個 layer → 送 lv_draw_*
@@ -1105,11 +1307,17 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
                                bool map_show, bool echo_show, uint8_t atc_layers) {
   lv_draw_buf_t *db = lv_canvas_get_draw_buf(cv);   // LVGL 9:canvas 緩衝改由 draw_buf 描述
   if (!db || !db->data) return;
+  // MIPI-DSI + LVGL 180°(PPA)下,重建若:
+  //   • 長時間關 invalidation(整 UI 卡住後一次全屏 flush),或
+  //   • 把 canvas HIDDEN 再顯示(髒區變大、PPA 整幀旋轉),
+  // 偶發整屏青/色塊閃一下(PSRAM 與 DSI/PPA 搶頻寬時更明顯)。
+  // 作法:輪廓先畫進離屏 cache(不碰顯示);僅在「拷貝+回波+環/ATC」這段短
+  // 臨界區關 invalidation,且絕不 HIDDEN——面板暫留上一幀已 flush 的畫面。
+  lv_display_t *disp = lv_obj_get_display(cv);
   // canvas 建成 LV_COLOR_FORMAT_NATIVE(= RGB565,2 bytes/px);LVGL 9 的
   // lv_color_t 是 24-bit,不能再拿來當畫布像素型別,直接用 uint16_t。
   // ESPHome 設 LV_DRAW_BUF_STRIDE_ALIGN=1,所以 stride 就是寬 x 2、可平坦定址。
   uint16_t *px = (uint16_t *) (void *) db->data;
-  radar_bg::PixCanvas pc(px, RADAR_CANVAS, RADAR_CANVAS);   // 線條走這條路,不進 LVGL 佇列
   const size_t NPX = (size_t) RADAR_CANVAS * RADAR_CANVAS;
   const size_t BYTES = NPX * sizeof(uint16_t);
   // 地圖資料以前是 map_data.h 裡的編譯期陣列,現在是 maptiles 從 maps 分割區
@@ -1135,55 +1343,110 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   // 沒有它畫面會停在舊的(或空的)底圖,直到使用者剛好去動座標才更新。
   bool fresh = cache && c_lat == lat0 && c_lon == lon0 && c_rng == rng &&
                c_map == map_show && c_gen == maptiles::generation;
-  if (fresh) {
-    memcpy((void *) px, cache, BYTES);
-  } else {
+  // Phase 1:只動離屏 cache。無 cache 時只能直接畫 px,臨界區會變長。
+  if (!fresh) {
+    uint16_t *build = cache ? (uint16_t *) (void *) cache : px;
+    // 無離屏緩衝時必須鎖住顯示,否則半成品會被 flush 出去。
+    if (!cache && disp) lv_display_enable_invalidation(disp, false);
+    radar_bg::PixCanvas pc_build(build, RADAR_CANVAS, RADAR_CANVAS);
     // 不要用 lv_canvas_fill_bg:它逐像素呼叫 lv_canvas_set_px,每次都重算 offset。
     // 1024x600 的 RGB 面板 GDMA 同時在吃 PSRAM 頻寬,兩者相撞會慢到每像素
     // ~230us,開機直接被 task watchdog 打死。canvas 無 alpha 且此處為不透明
     // 填滿,直接對緩衝區做 16-bit 填充(LVGL 9 已無 lv_color_fill,自己寫迴圈)。
     const uint16_t bg = lv_color_to_u16(lv_color_hex(0x040C08));
-    for (size_t i = 0; i < NPX; i++) px[i] = bg;
-    lv_obj_invalidate(cv);   // 補回 lv_canvas_fill_bg 原本會做的失效標記
+    for (size_t i = 0; i < NPX; i++) build[i] = bg;
     if (map_show) {
       float coslat = cosf(lat0 * 3.14159265f / 180.0f);
-      // 輪廓分層:海岸線最亮、國界中、州/省界最暗,近距離時線一多才分得出主次。
-      // 分隔符(NAN,kind)的第二個值帶種類;舊 map_data.h 是 NAN,NAN,讀到 NAN
-      // 一律當 0=海岸線,外觀與改版前完全相同。
-      static const uint32_t MAP_KIND_COLOR[3] = {0xD8C878, 0x9A8B54, 0x685E38};
-      uint16_t col = lv_color_to_u16(lv_color_hex(MAP_KIND_COLOR[0]));   // 淡黃色輪廓線
+      // 輪廓分層(outline NaN,kind):
+      //   0 海岸線  1 國界  2 省/州界  3 市界  4 河流  5 公路  6 鐵路
+      // 官方 CDN 舊圖磚通常只有 0/1;省/市界要自建帶 --states/--cities 的圖磚。
+      static const uint32_t MAP_KIND_COLOR[7] = {
+          0xD8C878,  // coast
+          0x9A8B54,  // country
+          0x685E38,  // province / state
+          0x3A3A3A,  // city / admin_2(淡灰,低對比)
+          0x3A6E8A,  // river
+          0x5A5A5A,  // road
+          0x4A3A5A,  // rail
+      };
+      uint16_t col = lv_color_to_u16(lv_color_hex(MAP_KIND_COLOR[0]));
       float r2 = rng * rng;
       bool have_prev = false;
-      lv_point_t prev{0, 0};
-      float pd2 = 1e18f;
+      bool skip_kind = false;   // 預設畫到市界;河/路/鐵太密略過
+      float pe = 0.f, pn = 0.f;
+      // 線段裁進雷達圓:先前「一端在圓內就整段畫」會讓線條穿出距離環到畫布四角。
+      auto clip_and_draw = [&](float e0, float n0, float e1, float n1) {
+        const float d0 = e0 * e0 + n0 * n0, d1 = e1 * e1 + n1 * n1;
+        const bool in0 = d0 <= r2, in1 = d1 <= r2;
+        float ce0, cn0, ce1, cn1;
+        if (in0 && in1) {
+          ce0 = e0; cn0 = n0; ce1 = e1; cn1 = n1;
+        } else {
+          const float de = e1 - e0, dn = n1 - n0;
+          const float a = de * de + dn * dn;
+          if (a < 1e-12f) return;
+          const float b = 2.f * (e0 * de + n0 * dn);
+          const float c = d0 - r2;
+          const float disc = b * b - 4.f * a * c;
+          if (disc < 0.f) return;
+          const float s = sqrtf(disc);
+          const float inv = 0.5f / a;
+          float u0 = (-b - s) * inv, u1 = (-b + s) * inv;
+          if (u0 > u1) { float t = u0; u0 = u1; u1 = t; }
+          float lo, hi;
+          if (in0 && !in1) {
+            lo = 0.f;
+            hi = (u0 > 0.f && u0 < 1.f) ? u0 : u1;
+            if (hi < 0.f || hi > 1.f) return;
+          } else if (!in0 && in1) {
+            lo = (u0 > 0.f && u0 < 1.f) ? u0 : u1;
+            hi = 1.f;
+            if (lo < 0.f || lo > 1.f) return;
+          } else {
+            lo = u0 > 0.f ? u0 : 0.f;
+            hi = u1 < 1.f ? u1 : 1.f;
+            if (lo >= hi) return;
+            const float tm = 0.5f * (lo + hi);
+            const float em = e0 + tm * de, nm = n0 + tm * dn;
+            if (em * em + nm * nm > r2) return;
+          }
+          ce0 = e0 + lo * de; cn0 = n0 + lo * dn;
+          ce1 = e0 + hi * de; cn1 = n0 + hi * dn;
+        }
+        const float s = (float) RADAR_R / rng;
+        pc_build.line((int) (RADAR_CX + ce0 * s), (int) (RADAR_CX - cn0 * s),
+                      (int) (RADAR_CX + ce1 * s), (int) (RADAR_CX - cn1 * s), col);
+      };
       for (int i = 0; i + 1 < MAP_OUTLINE_LEN; i += 2) {
         float la = MAP_OUTLINE[i], lo = MAP_OUTLINE[i + 1];
         if (isnan(la)) {
           have_prev = false;
           uint8_t kind = isnan(lo) ? 0 : (uint8_t) lo;
-          if (kind > 2) kind = 2;
-          col = lv_color_to_u16(lv_color_hex(MAP_KIND_COLOR[kind]));
+          if (kind > 6) kind = 2;
+          skip_kind = (kind > 3);   // 4 河 5 路 6 鐵 — 略過
+          if (!skip_kind)
+            col = lv_color_to_u16(lv_color_hex(MAP_KIND_COLOR[kind]));
           continue;
         }
+        if (skip_kind) continue;
         float e = (lo - lon0) * 111.320f * coslat;
         float n = (la - lat0) * 110.574f;
-        float d2 = e * e + n * n;
-        lv_point_t p;
-        p.x = (lv_coord_t) (RADAR_CX + e / rng * (float) RADAR_R);
-        p.y = (lv_coord_t) (RADAR_CX - n / rng * (float) RADAR_R);
-        if (have_prev && (d2 <= r2 || pd2 <= r2))
-          pc.line(prev.x, prev.y, p.x, p.y, col);
-        prev = p;
-        pd2 = d2;
+        if (have_prev)
+          clip_and_draw(pe, pn, e, n);
+        pe = e;
+        pn = n;
         have_prev = true;
       }
     }
     if (cache) {
-      memcpy(cache, px, BYTES);
       c_lat = lat0; c_lon = lon0; c_rng = rng; c_map = map_show;
       c_gen = maptiles::generation;
     }
   }
+  // Phase 2:短臨界區——一次拷貝可見緩衝,再疊回波/環/ATC,最後一次 invalidate。
+  if (disp) lv_display_enable_invalidation(disp, false);
+  if (cache) memcpy((void *) px, cache, BYTES);
+  radar_bg::PixCanvas pc(px, RADAR_CANVAS, RADAR_CANVAS);   // 線條走這條路,不進 LVGL 佇列
   // 回波預混合:g_echo_buf 為 [color_lo][color_hi][alpha],逐像素混進底圖。
   // 只走 g_echo_x0/x1 記下的逐列範圍——降雨通常只佔畫面一小塊,沒下雨時整張
   // 全空,這樣就從「必掃 324,900 像素、讀 950KB PSRAM」變成只碰真的有資料的
@@ -1341,6 +1604,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
     }
     }
   }
+  if (disp) lv_display_enable_invalidation(disp, true);
   lv_obj_invalidate(cv);
 }
 
@@ -1854,8 +2118,21 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
                                lv_obj_t *l4, int rssi) {
   char b[48];
   lv_label_set_text(cs, "SYSTEM");
-  snprintf(b, sizeof(b), "ESP32-S3 %uMHz   RSSI %d",
-           (unsigned) esp_rom_get_cpu_ticks_per_us(), rssi);
+#if defined(USE_ESP32_VARIANT_ESP32P4)
+  const char *chip = "ESP32-P4";
+#elif defined(USE_ESP32_VARIANT_ESP32S3)
+  const char *chip = "ESP32-S3";
+#elif defined(USE_ESP32_VARIANT_ESP32)
+  const char *chip = "ESP32";
+#else
+  const char *chip = "ESP32";
+#endif
+#ifdef CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ
+  const unsigned mhz = (unsigned) CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ;
+#else
+  const unsigned mhz = (unsigned) esp_rom_get_cpu_ticks_per_us();
+#endif
+  snprintf(b, sizeof(b), "%s %uMHz   RSSI %d", chip, mhz, rssi);
   lv_label_set_text(route, b);
   // 地圖狀態:**這是使用者唯一看得到它的地方**。Guition 那塊板的 I2C 佔用
   // GPIO19/20(原生 USB 資料腳),app 一啟動 USB serial 就死,拿不到開機 log;
@@ -1884,10 +2161,10 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
            (unsigned) (fsz >> 20), ap ? ap->size / 1048576.0f : 0.0f);
   lv_label_set_text(l3, b);
   uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
-  if (radar_bg::g_last_src > 0)   // 免費來源(手選或 fallback):無額度,顯示來源名
+  if (radar_bg::g_last_src > 0)   // 免費/合併來源:無額度,顯示來源名
     snprintf(b, sizeof(b), "UP %ud %02u:%02u   SRC %s", (unsigned) (up / 86400),
              (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
-             radar_bg::g_last_src == 2 ? "ADSB.LOL" : "A.LIVE");
+             radar_bg::src_name(radar_bg::g_last_src));
   else if (radar_bg::g_os_remaining >= 0)
     snprintf(b, sizeof(b), "UP %ud %02u:%02u   API %d", (unsigned) (up / 86400),
              (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),

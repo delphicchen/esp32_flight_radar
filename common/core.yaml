@@ -10,12 +10,23 @@
 #   • OTA:改韌體走 WiFi,esphome run 會自動選
 # =============================================================
 
+# OpenSky 憑證:先跑 python3 tools/sync_secrets_from_credentials.py
+# (讀 credentials.json → 寫 secrets.yaml),再 esphome compile/run
+substitutions:
+  opensky_cid: !secret opensky_client_id
+  opensky_sec: !secret opensky_client_secret
+  # 地圖圖磚 CDN。官方預設無省界/河/路;自建後改成你的 Pages 位址即可
+  # (見 tools/build_china_map_tiles.sh)。
+  maps_base_url: "https://delphicchen.github.io/flight-radar-maps/v1"
+
 esphome:
   name: flight-radar
   friendly_name: Flight Radar
   platformio_options:
     lib_deps:
       - kikuchan98/pngle@^1.0.0
+    build_flags:
+      - '-DRADAR_MAPS_BASE=\"${maps_base_url}\"'
     # ---- LVGL 9:平行繪圖單元(把渲染分到第二顆核心)----
     # LVGL 9 把繪製拆成 draw unit + draw task 佇列。開了 OS 之後,LVGL 會替每個
     # 軟體繪圖單元開一條 FreeRTOS 執行緒(lv_draw_sw.c 的 lv_draw_sw_init),
@@ -67,6 +78,23 @@ esphome:
           LvDropdownType *dds[8] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd), id(tz_dd),
                                      id(src_dd), id(unit_dd) };
           for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
+          // 燒錄時寫入的 OpenSky 憑證:覆蓋 NVS 裡可能的空值,免螢幕手填
+          {
+            const char *cid = "${opensky_cid}";
+            const char *sec = "${opensky_sec}";
+            if (cid[0] != '\0' && sec[0] != '\0') {
+              if (id(opensky_client_id).state != cid) {
+                auto c = id(opensky_client_id).make_call();
+                c.set_value(cid);
+                c.perform();
+              }
+              if (id(opensky_client_secret).state != sec) {
+                auto c = id(opensky_client_secret).make_call();
+                c.set_value(sec);
+                c.perform();
+              }
+            }
+          }
           // 還原時區:NVS 的 index → POSIX TZ 執行期套用,並把下拉同步到該項
           id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
@@ -90,6 +118,10 @@ esphome:
             lv_obj_add_state((lv_obj_t *) id(echo_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(echo_btn_l), lv_color_hex(0x04180C), 0);
           }
+          if (id(persist_on)) {
+            lv_obj_add_state((lv_obj_t *) id(persist_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(persist_btn_l), lv_color_hex(0x04180C), 0);
+          }
           if (id(atc_on)) {
             lv_obj_add_state((lv_obj_t *) id(atc_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(atc_btn_l), lv_color_hex(0x04180C), 0);
@@ -111,6 +143,20 @@ esphome:
           if (id(poll_when_off)) {
             lv_obj_add_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(poff_btn_l), lv_color_hex(0x04180C), 0);
+          }
+          // 工具列置頂,避免後期加入的覆蓋層/標籤搶走右上角觸控(尤其 SYS 靠右緣)
+          lv_obj_t *tb[] = {
+            (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn),
+            (lv_obj_t *) id(persist_btn), (lv_obj_t *) id(atc_btn),
+            (lv_obj_t *) id(pwr_btn), (lv_obj_t *) id(info_btn),
+          };
+          for (auto *b : tb) {
+            if (!b) continue;
+            lv_obj_move_foreground(b);
+            // 子 label 不吃觸控,點擊落到 button 本身
+            uint32_t nc = lv_obj_get_child_cnt(b);
+            for (uint32_t i = 0; i < nc; i++)
+              lv_obj_clear_flag(lv_obj_get_child(b, i), LV_OBJ_FLAG_CLICKABLE);
           }
           // SRC / UNIT 下拉:同步到 NVS 還原的值(設定頁未開過也要正確)
           lv_dropdown_set_selected(id(src_dd)->obj, id(data_src));
@@ -214,6 +260,7 @@ text:
     mode: text
     optimistic: true
     restore_value: true
+    initial_value: "${opensky_cid}"
     entity_category: config
   - platform: template
     name: OpenSky Client Secret
@@ -221,6 +268,7 @@ text:
     mode: password
     optimistic: true
     restore_value: true
+    initial_value: "${opensky_sec}"
     entity_category: config
   - platform: template
     name: HA URL                # HA 位址;空值=http://homeassistant.local:8123,不通請填 IP
@@ -396,10 +444,13 @@ globals:
   - { id: ac_lc,  type: 'std::vector<uint32_t>' } # last_contact(epoch秒),ATC 訊號延遲判斷
   - { id: slot_map, type: 'std::vector<int>' }   # 標記槽 -> 航班索引
   - { id: sel_cs_g, type: std::string }          # 選取中的呼號
+  - { id: sel_hex_g, type: uint32_t, initial_value: '0' }  # 選取中的 ICAO24(呼號短暫消失時用來對)
+  - { id: sel_hold_ms, type: uint32_t, initial_value: '0' } # 上次在 states 裡見到選中機的 millis
   - { id: spec_on, type: bool, initial_value: 'false' }  # 機型徽章按下 → 顯示輪廓與規格
   - { id: fetch_ms,    type: uint32_t, initial_value: '0' }
   - { id: poll_tick,   type: int,      initial_value: '0' }
   - { id: sweep_angle, type: float,    initial_value: '0' }
+  - { id: ac_shown_n,  type: int,      initial_value: '0' }  # 圈内可见航班数(扫描线减负用)
   - { id: slot_angle, type: 'std::vector<float>' }   # 各槽方位角(度,-1=隱藏)
   - { id: slot_glow,  type: 'std::vector<float>' }   # 各槽掃描高亮 0~1
   - id: map_on
@@ -410,6 +461,11 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'
+  # 真實雷達餘暉:慢速掃描 + 掃過才顯影、隨時間淡出(FADE 鈕)
+  - id: persist_on
+    type: bool
+    restore_value: true
+    initial_value: 'true'
   - { id: info_on, type: bool, initial_value: 'false' }   # i 鈕:右下面板顯示系統資訊
   - id: atc_on
     type: bool
@@ -427,7 +483,7 @@ globals:
   - id: data_src
     type: int
     restore_value: true
-    initial_value: '0'        # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)
+    initial_value: '4'        # 0=OpenSky 1=A.LIVE 2=ADSB.LOL 3=ADSB.FI 4=MERGE
   # ATC 圖層開關(右下面板設定,各自存 NVS)
   - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
@@ -477,9 +533,41 @@ script:
       slot: int
     then:
       - lambda: |-
-          if (slot < 0 || slot >= (int) id(slot_map).size()) return;
-          int i = id(slot_map)[slot];
-          if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          // 點選改「觸點最近航跡」:大號 mark(含呼號)熱區常蓋住鄰機,只信 slot 會選錯;
+          // 圖示錨點也曾因未縮放 28px PNG 而視覺偏上偏左。這裡用觸點在裁剪層內座標,
+          // 對所有圈內航機算到圖示中心的距離,取最近者(上限 ~RS(48))。
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float rng = id(radar_range).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
+          if (dt > 180.0f) dt = 180.0f;
+          lv_point_t pt{0, 0};
+          lv_indev_t *indev = lv_indev_active();
+          if (indev) lv_indev_get_point(indev, &pt);
+          const int tx = (int) pt.x - RS(12);
+          const int ty = (int) pt.y - RS(12);
+          const int max_d2 = RS(48) * RS(48);
+          int best_i = -1, best_d2 = max_d2 + 1;
+          const int n = (int) id(ac_lat).size();
+          for (int i = 0; i < n; i++) {
+            float rad = id(ac_trk)[i] * 3.14159265f / 180.0f;
+            float vkm = id(ac_vel)[i] * dt / 1000.0f;
+            float e  = (id(ac_lon)[i] - lon0) * 111.320f * coslat + vkm * sinf(rad);
+            float no = (id(ac_lat)[i] - lat0) * 110.574f          + vkm * cosf(rad);
+            if (e * e + no * no > rng * rng) continue;
+            int px = RADAR_CX + (int) (e / rng * (float) RADAR_R);
+            int py = RADAR_CX - (int) (no / rng * (float) RADAR_R);
+            int dx = px - tx, dy = py - ty;
+            int d2 = dx * dx + dy * dy;
+            if (d2 < best_d2) { best_d2 = d2; best_i = i; }
+          }
+          int i = best_i;
+          if (i < 0) {
+            // 觸點離所有機都太遠:退回被點到的 slot(例如點呼號遠端)
+            if (slot < 0 || slot >= (int) id(slot_map).size()) return;
+            i = id(slot_map)[slot];
+            if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          }
           id(spec_on) = false;   // 換機/取消選取都回到航班資訊(規格是上一台的)
           if (id(info_on)) {   // 點選飛機 → 退出系統資訊顯示
             id(info_on) = false;
@@ -489,14 +577,16 @@ script:
           if (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g)) {
             // 再點一次同一台 → 取消選取,右下角換回天氣
             id(sel_cs_g).clear();
+            id(sel_hex_g) = 0;
+            id(sel_hold_ms) = 0;
             id(show_weather).execute();
             return;
           }
           id(sel_cs_g) = id(ac_cs)[i];
+          id(sel_hex_g) = (i < (int) id(ac_hex).size()) ? id(ac_hex)[i] : 0;
+          id(sel_hold_ms) = millis();
           lv_label_set_text(id(sel_cs_l), id(ac_cs)[i].c_str());
           lv_label_set_text(id(sel_route_l), "ROUTE ...");
-          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
-          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
           float e = (id(ac_lon)[i] - lon0) * 111.320f * coslat;
           float no = (id(ac_lat)[i] - lat0) * 110.574f;
           float brg = atan2f(e, no) * 57.29578f;
@@ -837,6 +927,18 @@ interval:
       - lambda: |-
           // i 鈕開啟中 → 每秒刷新系統資訊(RAM/PSRAM/運行時間會變)
           if (id(info_on)) id(show_sysinfo).execute();
+          // 工具列每秒置頂一次:航班 mark 顯隱/set_pos 後偶發搶到上層,SYS 就點不到
+          {
+            static lv_obj_t *tb[] = {
+              (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn),
+              (lv_obj_t *) id(persist_btn), (lv_obj_t *) id(atc_btn),
+              (lv_obj_t *) id(pwr_btn), (lv_obj_t *) id(info_btn),
+            };
+            for (auto *b : tb) {
+              if (!b) continue;
+              lv_obj_move_foreground(b);
+            }
+          }
           // 響鈴中 → 每 15 秒重播一次,直到使用者按 DISMISS
           if (id(alarm_ringing) && (millis() - id(ring_last_ms)) >= 15000) {
             id(ring_last_ms) = millis();
@@ -889,40 +991,42 @@ interval:
           }
           // ---- 地圖圖磚:需要時下載一次,完成後由主迴圈載入 ----
           // 觸發條件刻意保守,避免變成重試迴圈把流量燒掉(見 PLAN_MAPTILES.md):
-          // 連上網之後,只有「目前沒有地圖」或「座標/半徑已經離存起來的那份太遠」
-          // 才抓。maps_key 記下上次請求的參數,同一組不重複請求。
+          // 連上網之後,只有「目前沒有地圖」或「座標/半徑/層級與存檔不同」才抓。
+          // maps_key 記下上次**成功**的參數;失敗才對「同一組 key」做 5 分鐘節流。
+          // 注意:不能對「換了座標」也套 5 分鐘 —— 否則剛在 A 地下完、改到 B 地
+          // 會繼續畫 A 的輪廓(圈外全空),看起來像地圖壞了。
           if (millis() > 10000 && wifi::global_wifi_component->is_connected() &&
               !radar_bg::g_maps_busy) {
             const int lv = radar_bg::maps_level_for(id(radar_range).state);
             // 0.5 度約 55 km:小幅移動不必重抓,格子是 10 度寬,綽綽有餘。
-            char key[48];
-            snprintf(key, sizeof(key), "%.1f,%.1f,L%d",
-                     id(home_lat).state, id(home_lon).state, lv);
-            // maps_key 只在「成功之後」才記起來。實機上第一次開機還在 captive
-            // portal(is_connected() 在 AP 模式也成立),抓一定失敗;先前是送出
-            // 請求就把 key 寫掉,於是連上網之後再也不會重試,地圖永遠是空的。
-            // 失敗只更新 maps_try_ms,5 分鐘後再試一次 —— 有節流但不會放棄。
-            if (id(maps_key) != key &&
-                (id(maps_try_ms) == 0 || millis() - id(maps_try_ms) > 300000)) {
+            char key[64];
+            // 把 CDN 指紋編進 key:換成自建 Pages 後必須重抓,不能沿用舊分割區內容。
+            uint32_t cdn_h = 2166136261u;
+            for (const char *p = radar_bg::MAPS_BASE; *p; ++p)
+              cdn_h = (cdn_h ^ (uint8_t) *p) * 16777619u;
+            snprintf(key, sizeof(key), "%.1f,%.1f,L%d,%08lx,s7",
+                     id(home_lat).state, id(home_lon).state, lv,
+                     (unsigned long) cdn_h);
+            const bool key_changed = (id(maps_key) != key);
+            const bool retrying_same = (id(maps_key_try) == key);
+            const bool throttle_ok =
+                !retrying_same || id(maps_try_ms) == 0 ||
+                (millis() - id(maps_try_ms) > 300000);
+            if (key_changed && throttle_ok) {
               id(maps_try_ms) = millis();
               id(maps_key_try) = key;
               radar_bg::request_maps(id(home_lat).state, id(home_lon).state,
                                      id(radar_range).state);
             }
           }
-          // 下載中在 INITIALIZING 下面那行顯示進度。分母是格數不是位元組(見
-          // radar_fetch.h 的說明);沒選航班時才寫,否則會蓋掉航線顯示。
+          // 下載進度只更新旗標;真正寫入 status_label 在後面與 AC:n 同一處,
+          // 避免被航班刷新立刻蓋掉(看起來像「完全沒進度」)。
           {
             static bool was_busy = false;
             const bool busy = radar_bg::g_maps_busy;
-            if (busy && id(sel_cs_g).empty()) {
-              char m[48];
-              snprintf(m, sizeof(m), "DOWNLOADING MAP %d/%d  %u KB",
-                       radar_bg::g_maps_progress, radar_bg::g_maps_total,
-                       (unsigned) (radar_bg::g_maps_bytes / 1024));
-              lv_label_set_text(id(sel_route_l), m);
-            } else if (was_busy && !busy && id(sel_cs_g).empty()) {
-              lv_label_set_text(id(sel_route_l), "");   // 抓完就清掉
+            if (was_busy && !busy) {
+              if (id(info_on)) id(show_sysinfo).execute();
+              else if (id(sel_cs_g).empty()) id(show_weather).execute();
             }
             was_busy = busy;
           }
@@ -931,6 +1035,7 @@ interval:
             radar_bg::g_maps_ready = false;
             xSemaphoreGive(radar_bg::mtx());
             id(maps_key) = id(maps_key_try);   // 只有成功才算數
+            id(maps_try_ms) = 0;               // 成功後允許立刻因換座標再抓
             // 載入在主迴圈做,不在背景 task —— 繪製程式碼直接讀 maptiles 的
             // vector,在 task 裡改會與繪製打架。
             maptiles::load_from_partition();
@@ -1041,10 +1146,20 @@ interval:
           // 選取中航班的詳情刷新(系統資訊顯示中則不覆蓋)
           if (!id(sel_cs_g).empty() && !id(info_on)) {
             int si = -1;
-            for (int i = 0; i < n; i++)
+            const int nn = (int) id(ac_cs).size();
+            for (int i = 0; i < nn; i++) {
               if (id(ac_cs)[i] == id(sel_cs_g)) { si = i; break; }
+              if (id(sel_hex_g) != 0 && i < (int) id(ac_hex).size() &&
+                  id(ac_hex)[i] == id(sel_hex_g)) {
+                si = i;
+                id(sel_cs_g) = id(ac_cs)[i];  // 呼號若變了(合併源差異)跟著更新
+                break;
+              }
+            }
             char b2[48];
             if (si >= 0) {
+              id(sel_hold_ms) = millis();
+              if (si < (int) id(ac_hex).size()) id(sel_hex_g) = id(ac_hex)[si];
               float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
               float coslat = cosf(lat0 * 3.14159265f / 180.0f);
               float e2 = (id(ac_lon)[si] - lon0) * 111.320f * coslat;
@@ -1077,6 +1192,15 @@ interval:
                                 id(ac_desc)[si].c_str(), id(ac_cat)[si].c_str(),
                                 id(ac_hex)[si], id(ac_cs)[si].c_str(),
                                 id(units_imperial));
+            } else if (id(sel_hold_ms) != 0 && millis() - id(sel_hold_ms) < 45000) {
+              // ADS-B 短暫丟星:保留上一輪數值,只在第一行提示 HOLD
+              const char *cur = lv_label_get_text(id(sel_l1));
+              if (cur == nullptr || strstr(cur, "HOLD") == nullptr) {
+                char hold[48];
+                snprintf(hold, sizeof(hold), "HOLD %lus",
+                         (unsigned long) ((millis() - id(sel_hold_ms)) / 1000));
+                lv_label_set_text(id(sel_l5), hold);
+              }
             } else {
               id(spec_on) = false;   // 飛出範圍 → 徽章消失,規格面板不能留著沒法關
               lv_obj_add_flag(id(spec_panel), LV_OBJ_FLAG_HIDDEN);
@@ -1086,13 +1210,21 @@ interval:
               lv_label_set_text(id(sel_l4), "");
               lv_label_set_text(id(sel_l5), "");
               radar_type_badge(id(sel_type_l), "");   // 隱藏機型徽章
-            lv_label_set_text(id(sel_l5), "");
             }
           }
           char b[64];
-          // 免費來源(手選或 OpenSky fallback)時在狀態列標示資料出處
-          const char *stag = radar_bg::g_last_src == 1 ? " [A.LIVE]"
-                           : radar_bg::g_last_src == 2 ? " [ADSB.LOL]" : "";
+          // 地圖下載中優先顯示進度(否則下面的 AC:n 每秒覆寫,進度永遠看不見)
+          if (radar_bg::g_maps_busy) {
+            snprintf(b, sizeof(b), "MAP %d/%d %uKB",
+                     radar_bg::g_maps_progress, radar_bg::g_maps_total,
+                     (unsigned) (radar_bg::g_maps_bytes / 1024));
+            lv_label_set_text(id(status_label), b);
+          } else {
+          // 狀態列出處標籤(MERGE/FI/LOL/LIVE);OpenSky 不掛後綴省寬度
+          char stag_buf[14] = "";
+          if (radar_bg::g_last_src > 0)
+            snprintf(stag_buf, sizeof(stag_buf), " [%s]", radar_bg::src_name(radar_bg::g_last_src));
+          const char *stag = stag_buf;
           auto t = id(rtc_time).now();
           // 狀態列在 800x480 只有 ~26 個等寬字的寬度:原本的 "AC:n   UPD hh:mm:ss  [A.LIVE]"
           // (29 字)會被螢幕右緣切掉,所以拿掉 UPD 與多餘空白(時間本身就看得懂)。
@@ -1101,6 +1233,7 @@ interval:
           else
             snprintf(b, sizeof(b), "AC:%d%s", n, stag);
           lv_label_set_text(id(status_label), b);
+          }
           static bool first_data = true;
           if (first_data) {
             first_data = false;
@@ -1186,6 +1319,16 @@ interval:
             { id(tr38_0), id(tr38_1), id(tr38_2), id(tr38_3), id(tr38_4), id(tr38_5) },
             { id(tr39_0), id(tr39_1), id(tr39_2), id(tr39_3), id(tr39_4), id(tr39_5) },
           };
+          radar_install_ac_clip(id(main_page)->obj, marks, vecs, trs);
+          // clip 以 create() 掛上後會變成 page 最上層;立刻把工具列抬回
+          {
+            lv_obj_t *tb[] = {
+              (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn),
+              (lv_obj_t *) id(persist_btn), (lv_obj_t *) id(atc_btn),
+              (lv_obj_t *) id(pwr_btn), (lv_obj_t *) id(info_btn),
+            };
+            for (auto *b : tb) if (b) lv_obj_move_foreground(b);
+          }
           bool atc = id(atc_on);
           if (id(slot_map).size() != AC_SLOTS) id(slot_map).assign(AC_SLOTS, -1);
           float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
@@ -1194,6 +1337,31 @@ interval:
           float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
           if (dt > 180.0f) dt = 180.0f;   // 資料太舊就不再外插
           int n = id(ac_lat).size(), shown = 0;
+          static uint32_t last_trail_fetch = 0;
+          const bool upd_trail = (id(fetch_ms) != last_trail_fetch);
+          static int16_t last_px[AC_SLOTS], last_py[AC_SLOTS], last_ang[AC_SLOTS];
+          static int last_map[AC_SLOTS];
+          static uint8_t last_sel[AC_SLOTS], last_lbl[AC_SLOTS], geom_init = 0;
+          if (!geom_init) {
+            for (int k = 0; k < AC_SLOTS; k++) {
+              last_px[k] = -9999; last_py[k] = -9999; last_ang[k] = -1;
+              last_map[k] = -2; last_sel[k] = 0xFF; last_lbl[k] = 0xFF;
+              // 122×64 是 800 基準;RS 後對齊 1024 佈局。plane.png 固定 28×28,
+              // 必須跟著 RADAR_SCALE 放大,否則錨點用 RS(14)/RS(20) 會讓圖示偏上偏左。
+              lv_obj_set_size(marks[k], RS(122), RS(64));
+              lv_image_set_scale(imgs[k], (uint32_t) (256.0f * RADAR_SCALE + 0.5f));
+              lv_image_set_pivot(imgs[k], 14, 14);   // 原圖像素中心;旋轉/縮放繞此點
+              lv_obj_set_pos(imgs[k], 0, 6);
+              lv_obj_set_pos(sqs[k], 11, 17);
+              lv_obj_clear_flag(imgs[k], LV_OBJ_FLAG_CLICKABLE);
+              lv_obj_clear_flag(sqs[k], LV_OBJ_FLAG_CLICKABLE);
+              lv_obj_clear_flag(dbs[k], LV_OBJ_FLAG_CLICKABLE);
+            }
+            // 右緣 SYS/PWR 略擴熱區(取代曾用的全局 x_max 拉伸)
+            lv_obj_set_ext_click_area((lv_obj_t *) id(info_btn), RS(12));
+            lv_obj_set_ext_click_area((lv_obj_t *) id(pwr_btn), RS(8));
+            geom_init = 1;
+          }
           float earr[AC_SLOTS], noarr[AC_SLOTS];
           bool selarr[AC_SLOTS];
           for (int i = 0; i < n && shown < AC_SLOTS; i++) {
@@ -1202,15 +1370,20 @@ interval:
             float e  = (id(ac_lon)[i] - lon0) * 111.320f * coslat + vkm * sinf(rad);
             float no = (id(ac_lat)[i] - lat0) * 110.574f          + vkm * cosf(rad);
             if (e * e + no * no > rng * rng) continue;
-            int px = RS(240) + (int) (e / rng * (float) RADAR_R);
-            int py = RS(240) - (int) (no / rng * (float) RADAR_R);
+            // 裁剪層原點=底圖左上,中心用 RADAR_CX(不再用頁面座標 RS(240))
+            int px = RADAR_CX + (int) (e / rng * (float) RADAR_R);
+            int py = RADAR_CX - (int) (no / rng * (float) RADAR_R);
             // 標籤避讓:ATC 模式且向量線朝右(航向 0~180)時,標籤翻到符號左側
             if (id(lbl_side).size() != AC_SLOTS) id(lbl_side).assign(AC_SLOTS, 0);
             bool lside = atc && sinf(rad) > 0.0f;
+            // 圖示錨點用「原圖像素」(plane 28×28 / 方塊 6×6),不要對 iy/半寬再套 RS,
+            // 否則 1024 上會偏上偏左。標籤文字區仍用 RS 排版。
+            const int ix = lside ? RS(94) : 0;
+            const int iy = 6;
             if ((uint8_t) lside != id(lbl_side)[shown]) {
               id(lbl_side)[shown] = lside ? 1 : 0;
-              lv_obj_set_pos(imgs[shown], lside ? RS(94) : 0, RS(6));
-              lv_obj_set_pos(sqs[shown], lside ? RS(105) : RS(11), RS(17));
+              lv_obj_set_pos(imgs[shown], ix, iy);
+              lv_obj_set_pos(sqs[shown], ix + 11, 17);
               if (lside) {
                 lv_obj_set_width(dbs[shown], RS(88));
                 lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_RIGHT, 0);
@@ -1220,13 +1393,37 @@ interval:
                 lv_obj_set_style_text_align(dbs[shown], LV_TEXT_ALIGN_LEFT, 0);
                 lv_obj_set_pos(dbs[shown], RS(32), RS(4));
               }
+              last_px[shown] = -9999;   // 佈局變了強制重放位置
             }
-            // 圖示中心對準位置(左置標籤時符號在容器右側)
-            lv_obj_set_pos(marks[shown], lside ? px - RS(108) : px - RS(14), py - RS(20));
-            lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
             bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
-            lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
-            lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
+            bool slot_ch = (last_map[shown] != i);
+            last_map[shown] = i;
+            // 圖示中心 = (mx+ix+14, my+iy+14) → 對準航跡 (px,py)
+            int mx = px - (ix + 14);
+            int my = py - (iy + 14);
+            if (slot_ch || abs(mx - last_px[shown]) > 1 || abs(my - last_py[shown]) > 1) {
+              lv_obj_set_pos(marks[shown], mx, my);
+              last_px[shown] = (int16_t) mx;
+              last_py[shown] = (int16_t) my;
+            }
+            // 航向量化到 5°,避免每秒因外插微抖重繪旋轉圖
+            int16_t ang10 = ((int16_t) (id(ac_trk)[i] * 10.0f)) % 3600;
+            if (ang10 < 0) ang10 += 3600;
+            ang10 = (int16_t) ((ang10 / 50) * 50);
+            if (slot_ch || ang10 != last_ang[shown]) {
+              lv_img_set_angle(imgs[shown], ang10);
+              last_ang[shown] = ang10;
+            }
+            // 選取高亮:呼號變黃(0xFFD24A)。餘暉迴圈會再疊掃描亮度,但選取變化
+            // 必須立刻寫色——以前包在 !persist_on 裡,FADE 開時點選完全不變色。
+            uint8_t sg = selg ? 1 : 0;
+            if (slot_ch || last_sel[shown] != sg) {
+              last_sel[shown] = sg;
+              lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
+              lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
+              if (!id(persist_on))
+                lv_obj_set_style_opa(marks[shown], LV_OPA_COVER, 0);
+            }
             earr[shown] = e; noarr[shown] = no; selarr[shown] = selg;
             // 訊號延遲:last_contact 超過 60 秒沒更新
             bool stale = false;
@@ -1247,16 +1444,15 @@ interval:
               float n2 = no + vkm2 * cosf(rad);
               float d2 = sqrtf(e2 * e2 + n2 * n2);
               if (d2 > rng) { e2 *= rng / d2; n2 *= rng / d2; }
-              int px2 = RS(240) + (int) (e2 / rng * (float) RADAR_R);
-              int py2 = RS(240) - (int) (n2 / rng * (float) RADAR_R);
+              int px2 = RADAR_CX + (int) (e2 / rng * (float) RADAR_R);
+              int py2 = RADAR_CX - (int) (n2 / rng * (float) RADAR_R);
               static lv_point_precise_t vp[AC_SLOTS][2];   // LVGL 9 的 line 點座標型別
               vp[shown][0].x = px;  vp[shown][0].y = py;
               vp[shown][1].x = px2; vp[shown][1].y = py2;
               lv_line_set_points(vecs[shown], vp[shown], 2);
-              lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
-              // 歷史軌跡點線:每段歷史放中點+端點兩顆小圓點(至多 6 顆,漸淡),
-              // 與實線向量做出視覺區隔。trail 依資料索引 i 儲存(0=最新),首個無效點即停
-              {
+              // 向量/尾跡可見性與 mark 一致,見下方 gshow 閘門(餘暉未掃過不顯示)
+              // 歷史軌跡:只在新抓取時重算(外插秒級移動不必每秒重佈 6 點)
+              if (upd_trail || slot_ch) {
                 int lx = px, ly = py, k = 0, d = 0;
                 for (; k < 3; k++) {
                   float tlat = (i < AC_SLOTS) ? id(trail_lat)[i * 3 + k] : NAN;
@@ -1265,8 +1461,8 @@ interval:
                   float te = (tlon - lon0) * 111.320f * coslat;
                   float tn = (tlat - lat0) * 110.574f;
                   if (te * te + tn * tn > rng * rng) break;
-                  int tx = RS(240) + (int) (te / rng * (float) RADAR_R);
-                  int ty = RS(240) - (int) (tn / rng * (float) RADAR_R);
+                  int tx = RADAR_CX + (int) (te / rng * (float) RADAR_R);
+                  int ty = RADAR_CX - (int) (tn / rng * (float) RADAR_R);
                   lv_obj_set_pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
                   lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
                   d++;
@@ -1282,36 +1478,62 @@ interval:
               lv_obj_add_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
               lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
               for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
-              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);   // 還原預設標籤色
+              if (slot_ch)
+                lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);
             }
-            char db[48];
-            if (atc) {
-              const char *arrow = (id(ac_vr)[i] > 0.5f) ? "↑" : (id(ac_vr)[i] < -0.5f ? "↓" : "=");
-              snprintf(db, sizeof(db), "%s%s\nFL%03.0f%s%.0fkts", id(ac_cs)[i].c_str(),
-                       stale ? "*" : "", id(ac_alt)[i] * 0.032808f, arrow, id(ac_vel)[i] * 1.9438f);
-              if (id(atc_route_on)) {
-                // 起訖站第三行(例 KHH-KIX):快取未命中會排背景查詢,查到前不顯示
-                std::string rt = radar_bg::route_cache_get(id(ac_cs)[i]);
-                if (!rt.empty() && rt != "-") {
-                  size_t dl = strlen(db);
-                  snprintf(db + dl, sizeof(db) - dl, "\n%s", rt.c_str());
+            // 只顯示「選中」航班的呼號/高度標籤,其餘只留機標,避免更新時滿屏呼號
+            uint8_t want_lbl = (uint8_t) (selg ? 1 : 0);
+            if (last_lbl[shown] != want_lbl) {
+              last_lbl[shown] = want_lbl;
+              if (want_lbl) lv_obj_clear_flag(dbs[shown], LV_OBJ_FLAG_HIDDEN);
+              else          lv_obj_add_flag(dbs[shown], LV_OBJ_FLAG_HIDDEN);
+            }
+            if (want_lbl) {
+              char db[48];
+              if (atc) {
+                const char *arrow = (id(ac_vr)[i] > 0.5f) ? "↑" : (id(ac_vr)[i] < -0.5f ? "↓" : "=");
+                snprintf(db, sizeof(db), "%s%s\nFL%03.0f%s%.0fkts", id(ac_cs)[i].c_str(),
+                         stale ? "*" : "", id(ac_alt)[i] * 0.032808f, arrow, id(ac_vel)[i] * 1.9438f);
+                if (id(atc_route_on)) {
+                  std::string rt = radar_bg::route_cache_get(id(ac_cs)[i]);
+                  if (!rt.empty() && rt != "-") {
+                    size_t dl = strlen(db);
+                    snprintf(db + dl, sizeof(db) - dl, "\n%s", rt.c_str());
+                  }
                 }
+              } else {
+                snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
+                         id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
               }
-            } else {
-              snprintf(db, sizeof(db), "%s\n%03.0f %.0f", id(ac_cs)[i].c_str(),
-                       id(ac_alt)[i] * 0.032808f, id(ac_vel)[i] * 1.9438f);
+              if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
+                lv_label_set_text(dbs[shown], db);
             }
-            if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
-              lv_label_set_text(dbs[shown], db);
             if (id(slot_angle).size() != AC_SLOTS) id(slot_angle).assign(AC_SLOTS, -1.0f);
             if (id(slot_glow).size() != AC_SLOTS) id(slot_glow).assign(AC_SLOTS, 0.0f);
             float bearing = atan2f(e, no) * 57.29578f;   // 0=北,順時針
             if (bearing < 0) bearing += 360.0f;
             id(slot_angle)[shown] = bearing;
             id(slot_map)[shown] = i;
-            lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            // 餘暉模式:尚未被掃描線掃過(glow≈0)的目標先藏起來;選取中例外以便點選後仍看得到
+            // ATC 向量/尾跡與 mark 同步,避免「線先出現、機還沒被掃到」
+            float gshow = id(slot_glow)[shown];
+            bool visible = !id(persist_on) || gshow > 0.02f || selg;
+            if (visible)
+              lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            else
+              lv_obj_add_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            if (atc) {
+              if (visible) {
+                lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              } else {
+                lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+                for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
+              }
+            }
             shown++;
           }
+          if (upd_trail) last_trail_fetch = id(fetch_ms);
+          id(ac_shown_n) = shown;
           // STCA:兩兩比對水平距離 < 5.5km 且高度差 < 300m → 衝突告警(紅色,選取中則紅白交替)
           if (id(conflict_slot).size() != AC_SLOTS) id(conflict_slot).assign(AC_SLOTS, 0);
           for (int a = 0; a < AC_SLOTS; a++) id(conflict_slot)[a] = 0;
@@ -1343,73 +1565,171 @@ interval:
             for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
             id(slot_map)[i] = -1;
             if (id(slot_angle).size() == AC_SLOTS) id(slot_angle)[i] = -1.0f;
+            last_map[i] = -2;
+            last_lbl[i] = 0xFF;
+            last_px[i] = -9999;
+            last_sel[i] = 0xFF;
           }
-  # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;6 秒轉一圈,角度用時間基準→不受幀率漂移)
-  - interval: 30ms
+  # 掃描線動畫:LVGL line 扇形尾巴 + 牆鐘角度(避免半圈快慢)
+  # 接近遠程一次雷達:FADE 開約 2.5 RPM(24s/圈);關閉 5 RPM(12s/圈)。
+  - interval: 16ms
     then:
       - lambda: |-
-          const float PERIOD = 6000.0f;            // 一圈毫秒數
-          uint32_t now = millis();
-          float prev = id(sweep_angle);
-          float cur = fmodf((float) now / PERIOD * 360.0f, 360.0f);
-          id(sweep_angle) = cur;
-          // 背光關著時面板雖然是暗的,LVGL 卻照常重繪(這個專案從來沒有呼叫
-          // lvgl.pause)。掃描線每幀 invalidate 的是「圓心到端點」的軸對齊
-          // 矩形,九條疊起來接近一個象限,等於白白拿重繪去跟面板掃描 DMA 搶
-          // PSRAM 頻寬。這裡跳過所有會 invalidate 的呼叫;角度與輝度衰減仍
-          // 照時間推進,所以亮起來的瞬間不會跳格。
+          const bool persist = id(persist_on);
+          const float PERIOD = persist ? 24000.0f : 12000.0f;
+          lv_obj_t *lines[5] = { id(sweep_line)->obj,
+                                 id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
+          id(sweep_angle) = radar_sweep_tick(
+              PERIOD, id(backlight).current_values.is_on(), id(sweep_angle),
+              id(main_page)->obj, (lv_obj_t *) id(base_canvas), lines);
+
+  # 航班餘暉/高亮(與掃描線拆開):80ms + 每拍 LVGL 預算,避免拖垮掃描線
+  - interval: 80ms
+    then:
+      - lambda: |-
+          if (id(slot_glow).size() != AC_SLOTS) id(slot_glow).assign(AC_SLOTS, 0.0f);
+          if (id(slot_angle).size() != AC_SLOTS) return;
+          const bool persist = id(persist_on);
           const bool dark = !id(backlight).current_values.is_on();
-          const float DEG = 3.14159265f / 180.0f;
-          // 掃描線 + 4 條尾巴一起算(共用三角函式基準,減少重複)。
-          // 尾巴從 8 條減半成 4 條:每幀最貴的是 lv_draw_line,LVGL 在「線的外接
-          // 矩形」上跑遮罩混色,45° 時那塊約 160x160,而所有線的矩形幾乎完全重疊,
-          // 同一片區域被反覆混色。條數減半 = 這一項直接減半。
-          // 角度不是等距的 k*2°:那樣第一條尾巴會離掃描線 2°,外緣多出約 2px 的
-          // 縫。改成 1.75° 起跳、間隔 2°,扇形的內外緣位置和原本 1°~8° 幾乎一致。
-          static const float TAIL_DEG[5] = { 0.0f, 1.75f, 3.75f, 5.75f, 7.75f };
-          if (!dark) {
-            lv_obj_t *lines[5] = { id(sweep_line)->obj,
-                                   id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
-            static lv_point_precise_t lp[5][2];   // LVGL 9 的 line 點座標型別
-            for (int k = 0; k < 5; k++) {
-              float a = (cur - TAIL_DEG[k]) * DEG;    // 第0條=掃描線,其後依序後退
-              lp[k][0].x = RS(240); lp[k][0].y = RS(240);
-              lp[k][1].x = RS(240) + (lv_coord_t) ((float) RADAR_R * sinf(a));
-              lp[k][1].y = RS(240) - (lv_coord_t) ((float) RADAR_R * cosf(a));
-              lv_line_set_points(lines[k], lp[k], 2);
-            }
+          static float prev_ang = -1.0f;
+          float cur = id(sweep_angle);
+          float prev = (prev_ang < 0.0f) ? cur : prev_ang;
+          prev_ang = cur;
+          float dang = (cur >= prev) ? (cur - prev) : (360.0f - prev + cur);
+          static lv_obj_t *marks[AC_SLOTS] = {};
+          static lv_obj_t *imgs[AC_SLOTS] = {};
+          static lv_obj_t *vecs[AC_SLOTS] = {};
+          static bool ptrs_ok = false;
+          if (!ptrs_ok) {
+            marks[0]=id(ac0); marks[1]=id(ac1); marks[2]=id(ac2); marks[3]=id(ac3);
+            marks[4]=id(ac4); marks[5]=id(ac5); marks[6]=id(ac6); marks[7]=id(ac7);
+            marks[8]=id(ac8); marks[9]=id(ac9); marks[10]=id(ac10); marks[11]=id(ac11);
+            marks[12]=id(ac12); marks[13]=id(ac13); marks[14]=id(ac14); marks[15]=id(ac15);
+            marks[16]=id(ac16); marks[17]=id(ac17); marks[18]=id(ac18); marks[19]=id(ac19);
+            marks[20]=id(ac20); marks[21]=id(ac21); marks[22]=id(ac22); marks[23]=id(ac23);
+            marks[24]=id(ac24); marks[25]=id(ac25); marks[26]=id(ac26); marks[27]=id(ac27);
+            marks[28]=id(ac28); marks[29]=id(ac29); marks[30]=id(ac30); marks[31]=id(ac31);
+            marks[32]=id(ac32); marks[33]=id(ac33); marks[34]=id(ac34); marks[35]=id(ac35);
+            marks[36]=id(ac36); marks[37]=id(ac37); marks[38]=id(ac38); marks[39]=id(ac39);
+            imgs[0]=(lv_obj_t*)id(ai0); imgs[1]=(lv_obj_t*)id(ai1); imgs[2]=(lv_obj_t*)id(ai2); imgs[3]=(lv_obj_t*)id(ai3);
+            imgs[4]=(lv_obj_t*)id(ai4); imgs[5]=(lv_obj_t*)id(ai5); imgs[6]=(lv_obj_t*)id(ai6); imgs[7]=(lv_obj_t*)id(ai7);
+            imgs[8]=(lv_obj_t*)id(ai8); imgs[9]=(lv_obj_t*)id(ai9); imgs[10]=(lv_obj_t*)id(ai10); imgs[11]=(lv_obj_t*)id(ai11);
+            imgs[12]=(lv_obj_t*)id(ai12); imgs[13]=(lv_obj_t*)id(ai13); imgs[14]=(lv_obj_t*)id(ai14); imgs[15]=(lv_obj_t*)id(ai15);
+            imgs[16]=(lv_obj_t*)id(ai16); imgs[17]=(lv_obj_t*)id(ai17); imgs[18]=(lv_obj_t*)id(ai18); imgs[19]=(lv_obj_t*)id(ai19);
+            imgs[20]=(lv_obj_t*)id(ai20); imgs[21]=(lv_obj_t*)id(ai21); imgs[22]=(lv_obj_t*)id(ai22); imgs[23]=(lv_obj_t*)id(ai23);
+            imgs[24]=(lv_obj_t*)id(ai24); imgs[25]=(lv_obj_t*)id(ai25); imgs[26]=(lv_obj_t*)id(ai26); imgs[27]=(lv_obj_t*)id(ai27);
+            imgs[28]=(lv_obj_t*)id(ai28); imgs[29]=(lv_obj_t*)id(ai29); imgs[30]=(lv_obj_t*)id(ai30); imgs[31]=(lv_obj_t*)id(ai31);
+            imgs[32]=(lv_obj_t*)id(ai32); imgs[33]=(lv_obj_t*)id(ai33); imgs[34]=(lv_obj_t*)id(ai34); imgs[35]=(lv_obj_t*)id(ai35);
+            imgs[36]=(lv_obj_t*)id(ai36); imgs[37]=(lv_obj_t*)id(ai37); imgs[38]=(lv_obj_t*)id(ai38); imgs[39]=(lv_obj_t*)id(ai39);
+            vecs[0]=id(vec0)->obj; vecs[1]=id(vec1)->obj; vecs[2]=id(vec2)->obj; vecs[3]=id(vec3)->obj;
+            vecs[4]=id(vec4)->obj; vecs[5]=id(vec5)->obj; vecs[6]=id(vec6)->obj; vecs[7]=id(vec7)->obj;
+            vecs[8]=id(vec8)->obj; vecs[9]=id(vec9)->obj; vecs[10]=id(vec10)->obj; vecs[11]=id(vec11)->obj;
+            vecs[12]=id(vec12)->obj; vecs[13]=id(vec13)->obj; vecs[14]=id(vec14)->obj; vecs[15]=id(vec15)->obj;
+            vecs[16]=id(vec16)->obj; vecs[17]=id(vec17)->obj; vecs[18]=id(vec18)->obj; vecs[19]=id(vec19)->obj;
+            vecs[20]=id(vec20)->obj; vecs[21]=id(vec21)->obj; vecs[22]=id(vec22)->obj; vecs[23]=id(vec23)->obj;
+            vecs[24]=id(vec24)->obj; vecs[25]=id(vec25)->obj; vecs[26]=id(vec26)->obj; vecs[27]=id(vec27)->obj;
+            vecs[28]=id(vec28)->obj; vecs[29]=id(vec29)->obj; vecs[30]=id(vec30)->obj; vecs[31]=id(vec31)->obj;
+            vecs[32]=id(vec32)->obj; vecs[33]=id(vec33)->obj; vecs[34]=id(vec34)->obj; vecs[35]=id(vec35)->obj;
+            vecs[36]=id(vec36)->obj; vecs[37]=id(vec37)->obj; vecs[38]=id(vec38)->obj; vecs[39]=id(vec39)->obj;
+            ptrs_ok = true;
           }
-          // 航班點:被掃描線掃過→高亮,之後依時間漸暗(不受幀率影響)
-          if (id(slot_glow).size() != 10) return;
-          lv_obj_t *imgs[AC_SLOTS] = {
-            (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1), (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3), (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5), (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
-            (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9), (lv_obj_t *) id(ai10), (lv_obj_t *) id(ai11), (lv_obj_t *) id(ai12), (lv_obj_t *) id(ai13), (lv_obj_t *) id(ai14), (lv_obj_t *) id(ai15),
-            (lv_obj_t *) id(ai16), (lv_obj_t *) id(ai17), (lv_obj_t *) id(ai18), (lv_obj_t *) id(ai19), (lv_obj_t *) id(ai20), (lv_obj_t *) id(ai21), (lv_obj_t *) id(ai22), (lv_obj_t *) id(ai23),
-            (lv_obj_t *) id(ai24), (lv_obj_t *) id(ai25), (lv_obj_t *) id(ai26), (lv_obj_t *) id(ai27), (lv_obj_t *) id(ai28), (lv_obj_t *) id(ai29), (lv_obj_t *) id(ai30), (lv_obj_t *) id(ai31),
-            (lv_obj_t *) id(ai32), (lv_obj_t *) id(ai33), (lv_obj_t *) id(ai34), (lv_obj_t *) id(ai35), (lv_obj_t *) id(ai36), (lv_obj_t *) id(ai37), (lv_obj_t *) id(ai38), (lv_obj_t *) id(ai39)
-          };
-          const float DECAY = 0.932f;              // 每幀衰減(30ms,約 0.5s 半衰,同 20fps 時的 0.89)
+          static uint8_t last_opa[AC_SLOTS];
+          static uint8_t last_gq[AC_SLOTS];
+          static uint8_t last_selg[AC_SLOTS];
+          static bool last_opa_init = false;
+          if (!last_opa_init) {
+            for (int i = 0; i < AC_SLOTS; i++) {
+              last_opa[i] = 255; last_gq[i] = 255; last_selg[i] = 0xFF;
+            }
+            last_opa_init = true;
+          }
+          // 每拍最多 N 次非「剛掃過」的樣式寫入,其餘只更新數值下拍補
+          int budget = (id(ac_shown_n) > 20) ? 6 : 10;
           for (int i = 0; i < AC_SLOTS; i++) {
             float ang = id(slot_angle)[i];
             if (ang < 0) continue;
             bool crossed;
             if (cur >= prev) crossed = (ang > prev && ang <= cur);
-            else             crossed = (ang > prev || ang <= cur);   // 跨 360
+            else             crossed = (ang > prev || ang <= cur);
             float g0 = id(slot_glow)[i];
-            float g = crossed ? 1.0f : g0 * DECAY;
+            float g;
+            if (!persist) {
+              g = crossed ? 1.0f : g0 - dang / 30.0f;
+              if (g < 0.0f) g = 0.0f;
+            } else {
+              g = crossed ? 1.0f : g0 - dang / 360.0f;
+              if (g < 0.0f) g = 0.0f;
+            }
             id(slot_glow)[i] = g;
-            // 已回到基底且上一幀也是基底 → 略過 recolor(省重繪)
-            if (g < 0.02f && g0 < 0.02f) continue;
-            if (dark) continue;   // 螢幕是暗的:輝度值照算,但不要 invalidate 圖示
             int idx = (i < (int) id(slot_map).size()) ? id(slot_map)[i] : -1;
             bool selg = (idx >= 0 && !id(sel_cs_g).empty() &&
                          idx < (int) id(ac_cs).size() && id(ac_cs)[idx] == id(sel_cs_g));
-            uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
-            uint8_t r = br + (uint8_t)((255 - br) * g);
-            uint8_t gg = bg + (uint8_t)((255 - bg) * g);
-            uint8_t b = bb + (uint8_t)((255 - bb) * g);
-            lv_obj_set_style_img_recolor(imgs[i], lv_color_make(r, gg, b), 0);
+            bool sel_ch = ((uint8_t) (selg ? 1 : 0) != last_selg[i]);
+            if (sel_ch) last_selg[i] = selg ? 1 : 0;
+            if (g < 0.02f && g0 < 0.02f && !selg) {
+              if (persist && !dark && last_opa[i] != 0) {
+                lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+                if (id(atc_on)) lv_obj_add_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
+                last_opa[i] = 0;
+              }
+              continue;
+            }
+            if (dark) continue;
+            if (persist) {
+              float go = selg ? (g < 0.25f ? 0.25f : g) : g;
+              if (go < 0.02f) {
+                if (last_opa[i] != 0) {
+                  lv_obj_add_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+                  if (id(atc_on)) lv_obj_add_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
+                  last_opa[i] = 0;
+                }
+                continue;
+              }
+              // opa 量化成 8 級(~12.5%)
+              uint8_t opa = (uint8_t) (go * 255.0f);
+              opa = (uint8_t) ((opa / 32) * 32);
+              if (opa < 32) opa = 32;
+              bool need_show = (last_opa[i] == 0) || crossed || sel_ch;
+              bool opa_ch = (opa != last_opa[i]) || crossed || sel_ch;
+              if (!crossed && !sel_ch && opa_ch && budget <= 0) continue;  // 數值已寫,樣式下拍再補
+              if (need_show) {
+                lv_obj_clear_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+                if (id(atc_on)) lv_obj_clear_flag(vecs[i], LV_OBJ_FLAG_HIDDEN);
+              }
+              if (opa_ch) {
+                if (!crossed && !sel_ch) budget--;
+                last_opa[i] = opa;
+                lv_obj_set_style_opa(marks[i], (lv_opa_t) opa, 0);
+              }
+              if (crossed) {
+                lv_obj_set_style_img_recolor(imgs[i], lv_color_make(0xFF, 0xFF, 0xFF), 0);
+                lv_obj_set_style_img_recolor_opa(imgs[i], LV_OPA_COVER, 0);
+              } else if (sel_ch || (g0 >= 0.98f && g < 0.98f)) {
+                uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
+                lv_obj_set_style_img_recolor(imgs[i], lv_color_make(br, bg, bb), 0);
+                lv_obj_set_style_img_recolor_opa(imgs[i], LV_OPA_COVER, 0);
+              }
+            } else {
+              if (last_opa[i] != 254) {
+                lv_obj_clear_flag(marks[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_style_opa(marks[i], LV_OPA_COVER, 0);
+                last_opa[i] = 254;
+              }
+              uint8_t gq = (uint8_t) (g * 8.0f);   // 更粗的高亮階
+              if (crossed || gq != last_gq[i] || sel_ch) {
+                if (!crossed && !sel_ch && budget <= 0) continue;
+                if (!crossed && !sel_ch) budget--;
+                last_gq[i] = gq;
+                uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
+                uint8_t r = br + (uint8_t) ((255 - br) * g);
+                uint8_t gg = bg + (uint8_t) ((255 - bg) * g);
+                uint8_t b = bb + (uint8_t) ((255 - bb) * g);
+                lv_obj_set_style_img_recolor(imgs[i], lv_color_make(r, gg, b), 0);
+                lv_obj_set_style_img_recolor_opa(imgs[i], LV_OPA_COVER, 0);
+              }
+            }
           }
+
   # 回波每 10 分鐘更新(開啟時)
   - interval: 600s
     then:

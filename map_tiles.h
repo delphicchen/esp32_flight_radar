@@ -62,7 +62,9 @@ static const size_t WIRE_AIRSPACE_REC = 8;
 // ---- merged, ready-to-draw data ----------------------------------------
 // Same names and meanings as the old map_data.h arrays, but filled at runtime.
 inline std::vector<float> OUTLINE;        // lat,lon pairs; NaN lat = separator,
-                                          // lon slot carries kind 0/1/2
+                                          // lon slot carries kind:
+                                          // 0 coast 1 country 2 province
+                                          // 3 city 4 river 5 road 6 rail
 inline std::vector<MapAirport> AIRPORTS;
 inline std::vector<MapRunway> RUNWAYS;
 inline std::vector<MapFix> FIXES;

@@ -101,6 +101,8 @@ pip install 'esphome==2026.3.*'
 esphome run radar-s3-5b.yaml       # or radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
 # P4 board -> lvgl9 branch:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
+# OpenSky 憑證(選用):專案根目錄放 credentials.json 後同步成 secrets.yaml
+python3 tools/sync_secrets_from_credentials.py
 ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
 ```
 
@@ -162,6 +164,8 @@ pip install 'esphome==2026.3.*'
 esphome run radar-s3-5b.yaml       # 或 radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
 # P4 板 → lvgl9 分支:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
+# OpenSky 憑證(選用):專案根目錄放 credentials.json 後同步成 secrets.yaml
+python3 tools/sync_secrets_from_credentials.py
 ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
 ```
 
@@ -221,6 +225,8 @@ pip install 'esphome==2026.3.*'
 esphome run radar-s3-5b.yaml       # 或 radar.yaml / radar-s3-5.yaml / radar-jc8048w550.yaml
 # P4 板 → lvgl9 分支:
 git checkout lvgl9 && pip install 'esphome==2026.6.*'
+# OpenSky 憑證(選用):專案根目錄放 credentials.json 後同步成 secrets.yaml
+python3 tools/sync_secrets_from_credentials.py
 ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
 ```
 

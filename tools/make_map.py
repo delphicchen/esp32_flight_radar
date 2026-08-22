@@ -43,6 +43,13 @@ SOURCES = {
     "coastline": NE_BASE + "ne_10m_coastline.geojson",
     "borders": NE_BASE + "ne_10m_admin_0_boundary_lines_land.geojson",
     "states": NE_BASE + "ne_10m_admin_1_states_provinces_lines.geojson",
+    # 中國地級市界(DataV)。Natural Earth admin_2 counties 只有美國,不能用。
+    "cities": "https://geo.datav.aliyun.com/areas_v3/bound/100000_full_city.json",
+    # 全國外緣(與市界同座標系),只用於剔除與海岸/國界重合的市界,不單獨入圖。
+    "china_bound": "https://geo.datav.aliyun.com/areas_v3/bound/100000.json",
+    "rivers": NE_BASE + "ne_10m_rivers_lake_centerlines.geojson",
+    "roads": NE_BASE + "ne_10m_roads.geojson",
+    "railroads": NE_BASE + "ne_10m_railroads.geojson",
     "airports": OA_BASE + "airports.csv",
     "runways": OA_BASE + "runways.csv",
     "navaids": OA_BASE + "navaids.csv",
@@ -50,7 +57,16 @@ SOURCES = {
 KM_PER_DEG_LAT = 110.574
 KM_PER_DEG_LON = 111.320  # at equator; scaled by cos(lat)
 
-OUTLINE_KIND = {"coastline": 0, "borders": 1, "states": 2}   # -> outline brightness class
+OUTLINE_KIND = {
+    "coastline": 0,
+    "borders": 1,
+    "states": 2,
+    "cities": 3,      # 市界 / admin_2
+    "rivers": 4,
+    "roads": 5,
+    "railroads": 6,
+}   # -> outline brightness / colour class in firmware
+
 
 AIRPORT_RANK = {"small_airport": 0, "medium_airport": 1, "large_airport": 2}
 CLS_MAP = {"CTR": 0, "TMA": 1, "CTA": 2}          # anything else -> 3
@@ -160,6 +176,191 @@ def build(polylines, lat0, lon0, tol, coslat):
         if len(simp) >= 2:
             out.append((kind, [(y, x / coslat) for x, y in simp]))  # (lat, lon)
     return out
+
+
+def _point_seg_dist2(px, py, ax, ay, bx, by):
+    """Squared distance from point (px,py) to segment AB."""
+    abx, aby = bx - ax, by - ay
+    apx, apy = px - ax, py - ay
+    ab2 = abx * abx + aby * aby
+    if ab2 <= 1e-24:
+        return apx * apx + apy * apy
+    t = (apx * abx + apy * aby) / ab2
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    dx = ax + t * abx - px
+    dy = ay + t * aby - py
+    return dx * dx + dy * dy
+
+
+def retain_shared_city_segments(polylines, quant=1e-5):
+    """Keep only city segments shared by >=2 rings; drop coast/country outer edges.
+
+    DataV adjacent cities reuse identical border vertices. Outer edges (coastline,
+    national boundary, coverage fringe) appear once and are removed. Call this on
+    clipped GeoJSON polylines — point order is (lon, lat) — *before* simplify.
+    Natural Earth coast/country do not align with DataV, so geometric matching
+    alone cannot strip those overlaps.
+    """
+    kind_city = OUTLINE_KIND["cities"]
+    counts = {}
+
+    def ekey(a, b):
+        a = (round(a[0] / quant) * quant, round(a[1] / quant) * quant)
+        b = (round(b[0] / quant) * quant, round(b[1] / quant) * quant)
+        return (a, b) if a <= b else (b, a)
+
+    out = []
+    city_pls = []
+    for kind, pts in polylines:
+        if kind != kind_city:
+            out.append((kind, pts))
+            continue
+        city_pls.append(pts)
+        for i in range(len(pts) - 1):
+            k = ekey(pts[i], pts[i + 1])
+            counts[k] = counts.get(k, 0) + 1
+
+    if not city_pls:
+        return out
+
+    kept = dropped = 0
+    for pts in city_pls:
+        run = []
+        for i in range(len(pts) - 1):
+            if counts.get(ekey(pts[i], pts[i + 1]), 0) >= 2:
+                kept += 1
+                if not run:
+                    run.append(pts[i])
+                run.append(pts[i + 1])
+            else:
+                dropped += 1
+                if len(run) >= 2:
+                    out.append((kind_city, run))
+                run = []
+        if len(run) >= 2:
+            out.append((kind_city, run))
+    if dropped:
+        print(f"  city shared-edge filter: kept {kept}, dropped {dropped} outer segments")
+    return out
+
+
+def strip_city_border_overlaps(polylines, coslat, tol_province=0.025,
+                               tol_coast=0.035, extra_refs=None):
+    """Drop city segments that *run along* coast/country/province (or extra_refs).
+
+    Only the segment midpoint is tested. Endpoint checks were too aggressive:
+    inland city borders that merely *meet* the coast/country at a T-junction lost
+    their last few segments and no longer touched the shoreline.
+
+    Outer coastal/national edges are already removed by retain_shared_city_segments;
+    this pass mainly clears city–city edges that duplicate province lines, plus a
+    tight DataV national outline match. NE coast tolerance stays modest.
+    """
+    kind_city = OUTLINE_KIND["cities"]
+    # (seg_list, grid, cell, tol2)
+    buckets = []
+
+    def pack(segs, tol):
+        if not segs:
+            return
+        cell = max(tol * 2.0, 0.03)
+        grid = {}
+        for idx, (a, b) in enumerate(segs):
+            minx, maxx = (a[0], b[0]) if a[0] <= b[0] else (b[0], a[0])
+            miny, maxy = (a[1], b[1]) if a[1] <= b[1] else (b[1], a[1])
+            i0 = int(math.floor(minx / cell))
+            i1 = int(math.floor(maxx / cell))
+            j0 = int(math.floor(miny / cell))
+            j1 = int(math.floor(maxy / cell))
+            for i in range(i0, i1 + 1):
+                for j in range(j0, j1 + 1):
+                    grid.setdefault((i, j), []).append(idx)
+        buckets.append((segs, grid, cell, tol * tol))
+
+    coast_segs, prov_segs = [], []
+    for kind, pts in polylines:
+        if kind > OUTLINE_KIND["states"]:
+            continue
+        target = prov_segs if kind == OUTLINE_KIND["states"] else coast_segs
+        for i in range(len(pts) - 1):
+            la0, lo0 = pts[i]
+            la1, lo1 = pts[i + 1]
+            target.append(((lo0 * coslat, la0), (lo1 * coslat, la1)))
+
+    ref_segs = []
+    for pts in (extra_refs or []):
+        for i in range(len(pts) - 1):
+            la0, lo0 = pts[i]
+            la1, lo1 = pts[i + 1]
+            ref_segs.append(((lo0 * coslat, la0), (lo1 * coslat, la1)))
+
+    pack(coast_segs, tol_coast)
+    pack(prov_segs, tol_province)
+    # DataV 國界與市界同座標系,緊容差即可;過寬會吃掉「接到岸邊」的市界末端
+    pack(ref_segs, 0.012)
+
+    if not buckets:
+        return list(polylines)
+
+    def near(px, py):
+        for segs, grid, cell, tol2 in buckets:
+            ci = int(math.floor(px / cell))
+            cj = int(math.floor(py / cell))
+            for di in (-1, 0, 1):
+                for dj in (-1, 0, 1):
+                    for idx in grid.get((ci + di, cj + dj), ()):
+                        (ax, ay), (bx, by) = segs[idx]
+                        if _point_seg_dist2(px, py, ax, ay, bx, by) <= tol2:
+                            return True
+        return False
+
+    out = []
+    dropped = 0
+    for kind, pts in polylines:
+        if kind != kind_city:
+            out.append((kind, pts))
+            continue
+        run = []
+        for i in range(len(pts) - 1):
+            la0, lo0 = pts[i]
+            la1, lo1 = pts[i + 1]
+            # 只看中點:與海岸平行的重合段會被去掉;接到岸邊的末端仍保留
+            mx = (lo0 + lo1) * 0.5 * coslat
+            my = (la0 + la1) * 0.5
+            if near(mx, my):
+                dropped += 1
+                if len(run) >= 2:
+                    out.append((kind_city, run))
+                run = []
+                continue
+            if not run:
+                run.append(pts[i])
+            run.append(pts[i + 1])
+        if len(run) >= 2:
+            out.append((kind_city, run))
+    if dropped:
+        print(f"  city overlap filter: dropped {dropped} segments on coast/country/province")
+    return out
+
+
+def load_china_bound_refs(cache, lat0, lon0, dlat, dlon, tol, coslat):
+    """Clip+simplify DataV national outline -> [(lat,lon)...] for city strip only."""
+    path = fetch("china_bound", cache)
+    with open(path, encoding="utf-8") as f:
+        gj = json.load(f)
+    feats = gj["features"] if gj.get("type") == "FeatureCollection" else [gj]
+    clipped = []
+    for ft in feats:
+        geom = ft.get("geometry") or ft
+        for pl in iter_polylines(geom):
+            clipped.extend(clip_polyline(pl, lat0, lon0, dlat, dlon))
+    if not clipped:
+        return []
+    built = build([(0, pl) for pl in clipped], lat0, lon0, tol, coslat)
+    return [pts for _, pts in built]
 
 
 # ---------------------------------------------------------------- ATC overlays
@@ -345,6 +546,41 @@ def c_str(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def keep_city_feature(ft):
+    """Keep prefecture-level cities; drop districts from DataV full_city pack.
+
+    DataV 100000_full_city.json mixes city / district / a few province rows.
+    Natural Earth-style packs without `level` are kept as-is.
+    """
+    props = ft.get("properties") or {}
+    level = str(props.get("level") or "").lower()
+    if level in ("district", "province", "country"):
+        return False
+    return True
+
+
+def keep_road_feature(ft):
+    """Keep only major roads so tiles stay small enough for the 512 KB maps partition."""
+    props = ft.get("properties") or {}
+    t = str(props.get("type") or props.get("road_type") or props.get("scalerank") or "").lower()
+    if t.isdigit():
+        # Natural Earth scalerank: 0..3 are the biggest roads
+        try:
+            return int(t) <= 3
+        except ValueError:
+            return True
+    keys = ("highway", "primary", "secondary", "beltway", "expressway",
+            "freeway", "motorway", "major", "trunk")
+    if any(k in t for k in keys):
+        return True
+    # scalerank as int property
+    sr = props.get("scalerank")
+    if isinstance(sr, (int, float)):
+        return sr <= 3
+    # Unknown label: drop to avoid swallowing the whole ne_10m_roads file
+    return False
+
+
 def read_existing_outline(path):
     """Extract the verbatim MAP_OUTLINE block from an existing map_data.h."""
     try:
@@ -365,6 +601,12 @@ def main():
     ap.add_argument("--lon", type=float, required=True, help="home longitude")
     ap.add_argument("--radius", type=float, required=True, help="max radar range you plan to use, km")
     ap.add_argument("--states", action="store_true", help="also include state/province borders")
+    ap.add_argument("--cities", action="store_true",
+                    help="include Natural Earth admin_2 city/county borders (地級市界)")
+    ap.add_argument("--rivers", action="store_true", help="include Natural Earth river centerlines")
+    ap.add_argument("--roads", action="store_true",
+                    help="include major Natural Earth roads (highways / primary)")
+    ap.add_argument("--railroads", action="store_true", help="include Natural Earth railroads")
     ap.add_argument("--geojson", action="append", default=[],
                     help="use local GeoJSON file(s) for the outline instead of Natural Earth")
     ap.add_argument("--tol", type=float, default=0.0,
@@ -416,7 +658,17 @@ def main():
         if args.geojson:
             files = [(p, 0) for p in args.geojson]   # own boundary file = main outline
         else:
-            names = ["coastline", "borders"] + (["states"] if args.states else [])
+            names = ["coastline", "borders"]
+            if args.states:
+                names.append("states")
+            if args.cities:
+                names.append("cities")
+            if args.rivers:
+                names.append("rivers")
+            if args.roads:
+                names.append("roads")
+            if args.railroads:
+                names.append("railroads")
             print("Fetching Natural Earth data (public domain):")
             files = [(fetch(n, cache), OUTLINE_KIND[n]) for n in names]
         clipped = []
@@ -425,14 +677,23 @@ def main():
                 gj = json.load(f)
             feats = gj["features"] if gj.get("type") == "FeatureCollection" else [gj]
             for ft in feats:
+                if kind == OUTLINE_KIND["roads"] and not keep_road_feature(ft):
+                    continue
+                if kind == OUTLINE_KIND["cities"] and not keep_city_feature(ft):
+                    continue
                 geom = ft.get("geometry") or ft
                 for pl in iter_polylines(geom):
                     clipped.extend((kind, r) for r in
                                    clip_polyline(pl, args.lat, args.lon, dlat, dlon))
         if not clipped:
             sys.exit("no map lines inside the bounding box - check --lat/--lon/--radius")
+        clipped = retain_shared_city_segments(clipped)
         while True:
             lines = build(clipped, args.lat, args.lon, tol, coslat)
+            refs = []
+            if args.cities and not args.geojson:
+                refs = load_china_bound_refs(cache, args.lat, args.lon, dlat, dlon, tol, coslat)
+            lines = strip_city_border_overlaps(lines, coslat, extra_refs=refs)
             npts = sum(len(p) for _, p in lines)
             if npts <= args.max_points or not lines:
                 break

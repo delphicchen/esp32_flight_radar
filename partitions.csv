@@ -1,22 +1,20 @@
-# Flight Radar 分割表 —— 為下載式地圖切出 `maps` 分割區。
+# Flight Radar partition table - carves out a `maps` partition for downloaded tiles.
 #
-# ESPHome 預設在 16MB flash 上給 app0/app1 各 0x7C0000(7.75MB),兩塊 app 加上
-# nvs 幾乎把 16MB 用滿(只剩約 28KB),放不下任何新分割區。但韌體實際只用 3.2MB,
-# 每塊 app 有 4.5MB 是空的 —— 縮到 6MB 仍有近一倍餘裕,空出來的位置給地圖。
+# ESPHome's default 16MB layout gives app0/app1 0x7C0000 (7.75MB) each; with nvs
+# that nearly fills the chip (~28KB left). Firmware is only ~3.2MB, so shrinking
+# each app to 6MB still leaves nearly 2x headroom and frees space for the map.
 #
-# ⚠️ 改分割表無法透過 OTA 生效,既有裝置必須接 USB 重燒一次(已確認接受)。
-#    重燒之後照樣能繼續 OTA。
+# WARNING: partition table changes do NOT apply over OTA. Existing devices need
+# a one-time USB reflash; OTA works again after that.
 #
-# maps:自訂 data 子型別 0x82,不是檔案系統 —— 單一 blob、整份重寫、循序讀取,
-#      用 esp_partition_* 直接存取即可(見 map_tiles.h)。512KB,實測需求約 120KB。
+# maps: custom data subtype 0x82, not a filesystem - one blob, full rewrite,
+#       sequential read via esp_partition_* (see map_tiles.h). 512KB; ~120KB used.
 #
-# ⚠️ 順序不能動:otadata + phy_init 剛好 0x3000,讓 app0 對齊後落在 **0x10000**。
-#    ESPHome 的 esp32/post_build.py.script 在走 FLASH_EXTRA_IMAGES 那條路徑時,
-#    把 app 的位址寫死成 0x10000(`sections.append(("0x10000", firmware_path))`)。
-#    一旦 app0 不在那裡(例如把 nvs 挪到前面,app0 就被推到 0x100000),merge-bin
-#    會把映像疊到其他分割區上、判定 section 重疊而失敗(exit 2),factory.bin 產不
-#    出來,瀏覽器安裝頁就沒有可燒的檔案 —— 而編譯本身仍然顯示 SUCCESS,很容易漏看。
-#    所以新分割區一律加在最後面,不要插隊到 app0 之前。
+# WARNING: keep this order. otadata + phy_init = 0x3000 so app0 lands at 0x10000.
+# ESPHome esp32/post_build.py.script hardcodes app at 0x10000 when using
+# FLASH_EXTRA_IMAGES. If app0 moves (e.g. nvs before it -> 0x100000), merge-bin
+# overlaps sections and fails (exit 2); factory.bin is missing while the build
+# still shows SUCCESS. Always append new partitions at the end.
 #
 # Name,     Type, SubType, Offset,  Size,
 otadata,    data, ota,     ,        0x2000,

@@ -47,6 +47,8 @@ esphome:
       - "-DRADAR_LOCAL_SPK=1"
       # microSD 由下方的 sd_storage 元件掛在 /sdcard,radar_fetch.h 不自己掛載
       - "-DRADAR_SD_EXT=1"
+      # 地圖 CDN(可在 radar-p4-7b.yaml substitutions.maps_base_url 覆寫)
+      - '-DRADAR_MAPS_BASE=\"${maps_base_url}\"'
 
 # ---- 本地覆寫元件 ----
 # storage / sd_storage 取自 p1ngb4ck 的 ESPHome fork(釘 commit,見兩者 __init__.py
@@ -240,12 +242,19 @@ touchscreen:
     id: my_touch
     display: main_display
     update_interval: 20ms
-    # GT911 的 raw 原點就在實體左上,與面板一致。實測(畫面正立時點四角的 raw):
+    # GT911 實測四角 raw(畫面正立):
     #   左上 (27,13)    右上 (1013,12)
     #   左下 (23,593)   右下 (1010,597)
-    # 範圍與方向都正確,所以不需要 calibration。
+    # 用實測範圍做近似恆等映射。勿再把 x_max 拉低(曾用 970/985):整屏 X 被拉伸後,
+    # 雷達區點選會偏到左側鄰機,SYS 雖好但選機全錯。右緣 SYS 改靠工具列置頂 +
+    # 略擴 ext_click_area(見 common/core.yaml),不靠全局 calibration 硬拉。
+    calibration:
+      x_min: 25
+      x_max: 1012
+      y_min: 12
+      y_max: 595
     #
-    # >>> 但這個分支「需要」鏡像,而 main 分支「不需要」,原因在旋轉做在哪一層 <<<
+    # >>> 這個分支「需要」鏡像,而 main 分支「不需要」,原因在旋轉做在哪一層 <<<
     #
     # ESPHome 的觸控基底類別完全不看顯示器旋轉,只套下面 transform: 裡明寫的東西
     # (touchscreen.cpp 的 add_raw_touch_position_,只用 swap_x_y_/invert_x_/invert_y_)。
