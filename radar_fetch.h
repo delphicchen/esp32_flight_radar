@@ -154,6 +154,10 @@ inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(
 // 撞到回 429;繼續用固定間隔撞牆只會讓限速更久才解除,所以收到 429 就指數退避。
 inline volatile uint32_t g_v2_cooldown_until[3] = {0, 0, 0};
 inline uint32_t g_v2_penalty_s[3] = {60, 60, 60};
+inline uint8_t g_v2_consec_fail[3] = {0, 0, 0};  // 連續連線失敗數(成功歸零)
+// 429 之外,adsb.lol 被限速時更常直接把 TLS 交握切線(st=-1、CONN_EOF)或
+// ECONNABORTED —— 不回狀態碼,光認 429 攔不住。連續兩次連線失敗就套同一組
+// 指數退避:少打不只少撞牆,Wi-Fi TX 爆發變稀也同時緩解面板抖動(EMI)。
 
 // HTTP body 上限。150KB 太緊:250km 半徑在繁忙空域(英國、日本)的航班清單就會
 // 超過,回應被截斷後解析必定失敗。字串配在 PSRAM,384KB 對 8MB PSRAM 綽綽有餘,
@@ -359,8 +363,17 @@ inline bool do_states_v2(const Job &j, int src) {
              src, (unsigned) g_v2_penalty_s[src]);
   } else if (st == 200) {
     g_v2_penalty_s[src] = 60;   // 成功就歸位,下次從最短退避開始
+    g_v2_consec_fail[src] = 0;
   }
   if (st != 200 || r.empty()) {
+    // 連線層失敗(st<=0)連續兩次也退避:伺服器切線式限速不會給 429。
+    if (st <= 0 && ++g_v2_consec_fail[src] >= 2) {
+      uint32_t now = millis() / 1000;
+      g_v2_cooldown_until[src] = now + g_v2_penalty_s[src];
+      if (g_v2_penalty_s[src] < 600) g_v2_penalty_s[src] *= 2;
+      ESP_LOGW("radar_bg", "v2 states(src %d) connect fail x%u -- backing off %us",
+               src, (unsigned) g_v2_consec_fail[src], (unsigned) g_v2_penalty_s[src]);
+    }
     ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
     return false;
   }

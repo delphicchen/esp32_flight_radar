@@ -3,6 +3,17 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Fixed
+
+- **Connection failures back off too, not just HTTP 429s.** adsb.lol often enforces
+  its rate limit by dropping the TLS handshake mid-way (`CONN_EOF`) or aborting the
+  connection instead of answering 429, so the v1.3.8 backoff never triggered and the
+  fallback chain kept knocking every 15 s. Two consecutive transport-level failures
+  now start the same exponential backoff per source (60 → 600 s cap, reset on
+  success), which also cuts the Wi-Fi TX bursts implicated in the panel jitter.
+
 ## [v1.3.8] — 2026-08-24
 
 ### Added
