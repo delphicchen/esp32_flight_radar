@@ -3,6 +3,30 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.8] — 2026-08-24
+
+### Added
+
+- **SYS page map status now shows how many outline points are in range** (`MAP 1t 688p 0nr`).
+  Outline segments only draw when an endpoint falls inside the radar radius, so a
+  loaded-but-blank map can mean "all points out of range" (range setting / sparse
+  tile) rather than a drawing bug. The count is tallied while rebuilding the base
+  image; it shows without the suffix until the first rebuild after boot.
+
+### Fixed
+
+- **Free-source 429s now back off instead of hammering.** When an OpenSky outage
+  falls back to adsb.lol, the 15 s free-source cadence could trip its rate limit
+  (HTTP 429) and then keep knocking every 15 s, which only prolongs the throttle.
+  A 429 now starts an exponential backoff (60 → 120 → … → 600 s cap) per source,
+  reset on the next success; a source in cooldown is skipped without a request.
+- **Wi-Fi modem sleep disabled** (`power_save_mode: none`). ESPHome's default
+  LIGHT power save buffers traffic between DTIM beacons and on some routers
+  single-packet DNS queries intermittently all time out for tens of seconds and
+  then recover — observed together with RGB-panel flicker on the generic S3
+  800x480 (issue #7 thread). The device is mains-powered, so power saving buys
+  nothing.
+
 ## [v1.3.7] — 2026-08-22
 
 ### Fixed
