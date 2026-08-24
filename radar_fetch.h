@@ -149,6 +149,11 @@ inline volatile int g_os_remaining = -1;   // OpenSky X-Rate-Limit-Remaining(-1=
 inline bool g_want_rl = false;             // 只在 states 請求期間擷取(bg task 序列執行,無競態)
 inline volatile uint32_t g_os_cooldown_until = 0;  // OpenSky 失敗冷卻期限(millis 秒),期間走免費來源
 inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(0/1/2,-1=尚未成功)
+// 免費 v2 來源的 429 退避:冷卻期限(millis 秒)+ 目前的懲罰秒數(成功後歸位)。
+// OpenSky 掛掉退到免費來源時,節奏是 poll_interval_alt 的 15 秒,曾把 adsb.lol
+// 撞到回 429;繼續用固定間隔撞牆只會讓限速更久才解除,所以收到 429 就指數退避。
+inline volatile uint32_t g_v2_cooldown_until[3] = {0, 0, 0};
+inline uint32_t g_v2_penalty_s[3] = {60, 60, 60};
 
 // HTTP body 上限。150KB 太緊:250km 半徑在繁忙空域(英國、日本)的航班清單就會
 // 超過,回應被截斷後解析必定失敗。字串配在 PSRAM,384KB 對 8MB PSRAM 綽綽有餘,
@@ -345,6 +350,16 @@ inline bool do_states_v2(const Job &j, int src) {
            src == 2 ? "api.adsb.lol" : "api.airplanes.live", j.lat, j.lon, r_nm);
   int st = 0;
   std::string r = http_req(url, false, "", nullptr, "", st, 131072);
+  if (st == 429) {
+    // 被限速:指數退避 60→120→…→600s(封頂)。millis 秒與 g_os_cooldown_until 同款。
+    uint32_t now = millis() / 1000;
+    g_v2_cooldown_until[src] = now + g_v2_penalty_s[src];
+    if (g_v2_penalty_s[src] < 600) g_v2_penalty_s[src] *= 2;
+    ESP_LOGW("radar_bg", "v2 states(src %d) rate limited -- backing off %us",
+             src, (unsigned) g_v2_penalty_s[src]);
+  } else if (st == 200) {
+    g_v2_penalty_s[src] = 60;   // 成功就歸位,下次從最短退避開始
+  }
   if (st != 200 || r.empty()) {
     ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
     return false;
@@ -410,7 +425,11 @@ inline void do_states(const Job &j) {
   // 對所有人一律 403(不是我們被封)。原本的順序等於每一輪都先浪費一次必定失敗
   // 的 TLS 連線,才輪到真正能用的來源 —— 也讓 adsb.lol 更容易撞到它的速率限制。
   // 保留它當第二順位:如果哪天恢復開放,不必改碼就會自己回來。
-  if (!do_states_v2(j, 2)) do_states_v2(j, 1);   // adsb.lol → airplanes.live
+  // 429 冷卻中的來源直接跳過,不發請求(退避由 do_states_v2 記帳)。
+  uint32_t now2 = millis() / 1000;
+  bool skip2 = now2 < g_v2_cooldown_until[2];
+  if (!skip2 && !do_states_v2(j, 2) && now2 >= g_v2_cooldown_until[1])
+    do_states_v2(j, 1);   // adsb.lol → airplanes.live
 }
 
 inline void do_route(const Job &j) {
@@ -971,6 +990,11 @@ inline uint8_t atc_layer_mask(bool atc, bool asp, bool rwy, bool apt, bool fix) 
   return atc ? (uint8_t) ((asp ? 1 : 0) | (rwy ? 2 : 0) | (apt ? 4 : 0) | (fix ? 8 : 0)) : 0;
 }
 
+// 最近一次底圖重建時,半徑內的輪廓點數(-1 = 尚未算過 / MAP 關閉)。輪廓線只在
+// 「線段至少一端落在雷達半徑內」才畫:資料載入成功(MAP Nt Np)但 near=0,就代表
+// 點全在範圍外 —— 是範圍/圖磚密度的問題,不是繪製 bug。SYS 頁的 MAP 行會顯示。
+inline volatile int g_map_near = -1;
+
 inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
                                bool map_show, bool echo_show, uint8_t atc_layers) {
   lv_img_dsc_t *img = lv_canvas_get_img(cv);
@@ -1005,6 +1029,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   if (fresh) {
     memcpy((void *) img->data, cache, BYTES);
   } else {
+    if (!map_show) g_map_near = -1;   // MAP 關掉就別讓 SYS 頁顯示舊的點數
     // 不要用 lv_canvas_fill_bg:它逐像素呼叫 set_px_color + set_px_alpha
     // (570x570 = 324,900 次 x2),每次都重算 offset 再走 lv_memcpy_small。
     // 1024x600 的 RGB 面板 GDMA 同時在吃 PSRAM 頻寬,兩者相撞會慢到每像素
@@ -1028,6 +1053,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       bool have_prev = false;
       lv_point_t prev{0, 0};
       float pd2 = 1e18f;
+      int near_pts = 0;
       for (int i = 0; i + 1 < MAP_OUTLINE_LEN; i += 2) {
         float la = MAP_OUTLINE[i], lo = MAP_OUTLINE[i + 1];
         if (isnan(la)) {
@@ -1040,6 +1066,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         float e = (lo - lon0) * 111.320f * coslat;
         float n = (la - lat0) * 110.574f;
         float d2 = e * e + n * n;
+        if (d2 <= r2) near_pts++;   // 診斷:半徑內的點數(SYS 頁 MAP 行)
         lv_point_t p;
         p.x = (lv_coord_t) (RADAR_CX + e / rng * (float) RADAR_R);
         p.y = (lv_coord_t) (RADAR_CX - n / rng * (float) RADAR_R);
@@ -1051,6 +1078,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         pd2 = d2;
         have_prev = true;
       }
+      g_map_near = near_pts;
     }
     if (cache) {
       memcpy(cache, img->data, BYTES);
@@ -1711,10 +1739,18 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
   // 只能靠猜是下載、儲存還是繪製出問題(issue #7)。
   //   MAP 2t 3075p = 2 張圖磚、3075 個輪廓點 → 資料在,問題在繪製
   //   MAP none     = 分割區裡沒有有效地圖 → 問題在下載或儲存
-  if (maptiles::loaded)
-    snprintf(b, sizeof(b), "MAP %dt %up",
-             maptiles::stored_tiles, (unsigned) (maptiles::OUTLINE.size() / 2));
-  else
+  // 尾碼 Nnr = 半徑內的輪廓點數(底圖重建時順手統計):0nr 但點數正常,代表點全在
+  // 雷達半徑外 —— 是範圍/圖磚密度的問題,不是畫不出來(issue #7 的 Will:
+  // MAP 1t 688p 卻整片空白,先用這個分辨「範圍太小/資料太疏」還是投影 bug)。
+  if (maptiles::loaded) {
+    if (g_map_near >= 0)
+      snprintf(b, sizeof(b), "MAP %dt %up %dnr",
+               maptiles::stored_tiles, (unsigned) (maptiles::OUTLINE.size() / 2),
+               g_map_near);
+    else
+      snprintf(b, sizeof(b), "MAP %dt %up",
+               maptiles::stored_tiles, (unsigned) (maptiles::OUTLINE.size() / 2));
+  } else
     snprintf(b, sizeof(b), "MAP none");
   lv_label_set_text(sq, b);
   snprintf(b, sizeof(b), "RAM   %4u / %4u KB",

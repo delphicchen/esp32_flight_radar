@@ -143,6 +143,10 @@ logger:
   level: INFO
 
 wifi:
+  # 關掉 modem sleep(ESPHome 預設 LIGHT):省電模式下單包 UDP(DNS 查詢)在
+  # 部分路由器上會間歇性全部逾時,數十秒後自癒,並與 RGB 面板閃爍同時出現
+  # (issue #7 追蹤,2026-08-24)。本裝置持續插電,省電沒有意義。
+  power_save_mode: none
   ap:
     ssid: "Radar-Setup"
     password: "12345678"
