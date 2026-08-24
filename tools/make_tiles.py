@@ -44,6 +44,12 @@ Examples:
         --add-geojson tools/cache/twcounty2010.geojson \
         --airspace-geojson tools/taiwan_airspace.geojson --min-airport small
 
+    # US county lines as a dim layer under the state borders (Natural Earth
+    # ne_10m_admin_2_counties, US-only). The :3 picks the county brightness
+    # class; without it a detail pack draws coastline-bright.
+    python make_tiles.py --out ../flight-radar-maps --cells N30W090 --states \
+        --add-geojson tools/cache/ne_10m_admin_2_counties.geojson:3
+
     # everything, all levels
     python make_tiles.py --out ../flight-radar-maps
 """
@@ -105,6 +111,21 @@ def all_cells():
     for lat in range(-80, 80, CELL_DEG):
         for lon in range(-180, 180, CELL_DEG):
             yield lat, lon
+
+
+def split_kind(spec, default=0):
+    """FILE[:KIND] -> (path, kind). Bare paths keep the default class.
+
+    Split from the right and only when the suffix is a lone digit, so a
+    Windows drive letter ("C:\\maps\\x.geojson") is left alone.
+    """
+    head, sep, tail = spec.rpartition(":")
+    if sep and tail.isdigit():
+        kind = int(tail)
+        if not 0 <= kind <= 3:
+            raise SystemExit("kind must be 0-3 (got %d in %r)" % (kind, spec))
+        return head, kind
+    return spec, default
 
 
 # ------------------------------------------------------------------ sections
@@ -189,7 +210,10 @@ def build_tile(lat0, lon0, level, cache, args):
         # outline for a national boundary file would erase every neighbour's
         # coastline in that cell. (--geojson keeps make_map.py's replace
         # semantics, which is what you want for a single-location build.)
-        files += [(p, 0) for p in (args.add_geojson or [])]
+        # A detail pack usually wants its own brightness class -- county or
+        # district lines under the state borders, not level with the coast --
+        # so --add-geojson takes an optional :KIND suffix (default 0).
+        files += [split_kind(p) for p in (args.add_geojson or [])]
         clipped = []
         for path, kind in files:
             for feat in mm.json.load(open(path, encoding="utf-8"))["features"]:
@@ -263,9 +287,11 @@ def main():
     p.add_argument("--states", action="store_true", help="include state/province borders")
     p.add_argument("--geojson", action="append",
                    help="local GeoJSON outline INSTEAD of Natural Earth")
-    p.add_argument("--add-geojson", action="append",
+    p.add_argument("--add-geojson", action="append", metavar="FILE[:KIND]",
                    help="local GeoJSON outline drawn IN ADDITION to Natural Earth "
-                        "(detail pack, e.g. the g0v Taiwan county boundaries)")
+                        "(detail pack, e.g. the g0v Taiwan county boundaries). "
+                        "Append :KIND to pick the brightness class -- "
+                        "0 coastline, 1 country, 2 state, 3 county (default 0)")
     p.add_argument("--airspace-geojson", action="append",
                    help="local GeoJSON with CTR/TMA polygons (name + type properties)")
     p.add_argument("--airspace-types", default="CTR,TMA,CTA",

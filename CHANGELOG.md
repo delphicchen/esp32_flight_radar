@@ -5,6 +5,16 @@ out first, because that is the part that costs you time.
 
 ## [Unreleased]
 
+### Added
+
+- **A detail pack can pick its own map brightness class.** `make_tiles.py --add-geojson`
+  now takes an optional `:KIND` suffix (`--add-geojson counties.geojson:3`), so a county
+  or district layer draws under the state borders instead of level with the coastline.
+  There is a fourth outline class for it (`0x494227`, about 70% of the state-border
+  brightness, continuing the existing ramp). The kind already travelled in the tile
+  format as a float, so this needs no format bump: firmware older than this clamps
+  kind 3 to the state-border colour and still renders the tile.
+
 ### Fixed
 
 - **Connection failures back off too, not just HTTP 429s.** adsb.lol often enforces
