@@ -20,6 +20,12 @@ substitutions:
   f_clock: "64"
   f_mono: "18"
   f_tiny: "14"
+  # 螢幕方向:電源線從另一邊出來時把畫面轉 180°。兩個值必須成對修改 ——
+  # LVGL 接手旋轉後會把 display rotation 歸零,觸控不會自己跟著轉。
+  #   正立: disp_rotation "0°"   + touch_mirror "false"
+  #   倒轉: disp_rotation "180°" + touch_mirror "true"
+  disp_rotation: "0°"
+  touch_mirror: "false"
 
 packages:
   core:  !include common/core.yaml

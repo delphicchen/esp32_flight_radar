@@ -161,6 +161,11 @@ touchscreen:
     reset_pin:
       ch422g: io_ex
       number: 1                 # EXIO1 = touch reset (verify)
+    transform:
+      # 與 display 的 ${disp_rotation} 成對 —— LVGL 接手旋轉後會把 display
+      # rotation 歸零(lvgl_esphome.cpp),觸控不會自己跟著轉,得自己鏡像。
+      mirror_x: ${touch_mirror}
+      mirror_y: ${touch_mirror}
     on_touch:
       - lambda: |-
           if (!id(backlight).current_values.is_on()) {
@@ -222,6 +227,10 @@ touchscreen:
 display:
   - platform: mipi_rgb
     id: main_display
+    # 螢幕方向(見入口檔的 ${disp_rotation})。mipi_rgb 的 rotation_as_transform()
+    # 會把 180° 換成面板 MADCTL 的 mirror_x+mirror_y,再把軟體旋轉歸零 —— LVGL
+    # 完全不知情,不必多配旋轉緩衝,等於免費。
+    rotation: ${disp_rotation}
     model: ESP32-S3-TOUCH-LCD-4.3
     update_interval: never
     auto_clear_enabled: false

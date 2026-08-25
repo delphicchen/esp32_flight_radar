@@ -7,6 +7,13 @@ out first, because that is the part that costs you time.
 
 ### Added
 
+- **The display can be flipped 180°** so the power cord can leave the case on either
+  side (#14). Set `disp_rotation: "180°"` and `touch_mirror: "true"` together in the
+  entry file — LVGL resets the display's own rotation once it takes over, so the GT911
+  needs the matching mirror or taps land in the opposite corner. On the `mipi_rgb`
+  boards it is free: ESPHome folds the rotation into the panel's MADCTL and leaves the
+  software rotation at zero. On the `rpi_dpi_rgb` boards LVGL rotates in software,
+  which costs a second buffer and a copy per flush. Defaults to upright everywhere.
 - **A detail pack can pick its own map brightness class.** `make_tiles.py --add-geojson`
   now takes an optional `:KIND` suffix (`--add-geojson counties.geojson:3`), so a county
   or district layer draws under the state borders instead of level with the coastline.

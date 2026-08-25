@@ -65,6 +65,11 @@ touchscreen:
     id: my_touch
     display: main_display
     update_interval: 20ms     # 預設 50ms;縮短輪詢降低觸控延遲(I2C 負擔極小)
+    transform:
+      # 與 display 的 ${disp_rotation} 成對 —— LVGL 接手旋轉後會把 display
+      # rotation 歸零(lvgl_esphome.cpp),觸控不會自己跟著轉,得自己鏡像。
+      mirror_x: ${touch_mirror}
+      mirror_y: ${touch_mirror}
     on_touch:
       - lambda: |-
           if (!id(backlight).current_values.is_on()) {
@@ -100,6 +105,10 @@ touchscreen:
 display:
   - platform: rpi_dpi_rgb
     id: main_display
+    # 螢幕方向(見入口檔的 ${disp_rotation})。rpi_dpi_rgb 沒有硬體 MADCTL,
+    # 180° 走 LVGL 軟體旋轉:多配一份與繪圖緩衝同大的旋轉緩衝,每次 flush 多一趟
+    # 逐像素搬移。預設 0° 不付這個代價。
+    rotation: ${disp_rotation}
     update_interval: never
     auto_clear_enabled: false
     color_order: RGB

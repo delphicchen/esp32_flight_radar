@@ -59,6 +59,32 @@ and set `radar_canvas`/font sizes to match. **`ui/ui_800x480.yaml` is the source
 truth** — the other layouts are generated, so edit the 800×480 file and re-run the
 script instead of touching the generated one.
 
+### Flipping the display 180°
+
+If the power cord leaves the case on the wrong side, turn the picture upside down in
+the entry file:
+
+```yaml
+substitutions:
+  disp_rotation: "180°"
+  touch_mirror: "true"
+```
+
+**Change both or neither.** LVGL takes the rotation over and resets the display's own
+rotation to zero, so the GT911 does not follow it — the touch transform has to mirror
+to match, or taps land in the opposite corner.
+
+What it costs depends on the panel driver:
+
+| Boards | Driver | Cost of 180° |
+|--------|--------|--------------|
+| `radar-s3-5.yaml`, `radar-s3-5b.yaml` | `mipi_rgb` | **free** — ESPHome folds the rotation into the panel's MADCTL (`mirror_x` + `mirror_y`) and leaves the software rotation at zero |
+| `radar.yaml`, `radar-jc8048w550.yaml` | `rpi_dpi_rgb` | **per frame** — no hardware transform, so LVGL rotates in software: a second buffer the size of the draw buffer, plus a pixel-by-pixel copy on every flush |
+
+On the Guition, which is already fighting flicker, watch the sweep after enabling it.
+The P4 entry lives on the `lvgl9` branch and is already rotated 180° — its EK79007 is
+marked `no_transform`, so it has always paid the software cost.
+
 ### Gotcha: flashing the wrong board's image
 
 All four entry files use the same ESPHome `name: flight-radar`, and ESPHome caches the
@@ -200,6 +226,29 @@ RGB 板共同需求:**≥8 MB octal PSRAM**(quad 餵不動 RGB 屏)、**GT911** 
 換新解析度時用 `python3 tools/scale_layout.py ui/ui_800x480.yaml ui/ui_<w>x<h>.yaml <倍率>`
 生成版面,並把 `radar_canvas`/字型大小對應調整。**`ui/ui_800x480.yaml` 是唯一來源** ——
 其他解析度的版面都是生成檔,要改請改 800×480 那份再重跑腳本,不要動生成檔。
+
+### 把畫面轉 180°
+
+電源線出線方向不對時,在入口檔把畫面倒過來:
+
+```yaml
+substitutions:
+  disp_rotation: "180°"
+  touch_mirror: "true"
+```
+
+**兩個要一起改,不能只改一個。** LVGL 接手旋轉之後會把 display 自己的 rotation 歸零,
+GT911 不會跟著轉,得靠觸控的 transform 鏡像對回去,否則點下去會跑到對角。
+
+代價依面板驅動而不同:
+
+| 板子 | 驅動 | 180° 的代價 |
+|------|------|-------------|
+| `radar-s3-5.yaml`、`radar-s3-5b.yaml` | `mipi_rgb` | **免費** —— ESPHome 把旋轉折進面板 MADCTL 的 `mirror_x` + `mirror_y`,軟體旋轉維持 0 |
+| `radar.yaml`、`radar-jc8048w550.yaml` | `rpi_dpi_rgb` | **每幀付費** —— 沒有硬體 transform,只能靠 LVGL 軟體旋轉:多配一份與繪圖緩衝同大的緩衝,每次 flush 多一趟逐像素搬移 |
+
+Guition 本來就在對抗閃爍,開了之後要盯著掃描線看。P4 的入口在 `lvgl9` 分支、本來就是
+180°:它的 EK79007 被標記為 `no_transform`,一直都在付軟體旋轉的代價。
 
 ### 陷阱:燒到另一塊板的映像
 
