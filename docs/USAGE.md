@@ -50,9 +50,13 @@ Instead of typing the entity id by hand, the alarm page can list every `media_pl
 2. Open the device's web page at `http://flight-radar.local` (or the device page in HA) and paste the token into **HA Token**. **HA URL** can stay empty — it defaults to `http://homeassistant.local:8123`; if the scan later reports `HA UNREACHABLE`, set it to your HA address by IP instead (e.g. `http://192.168.1.10:8123` — mDNS name resolution is unreliable on some networks). Both fields are saved to flash and survive reboots.
 3. Open the alarm page — it **scans automatically** on entry once the token is set (or press **SCAN** in the top bar). All speaker dropdowns fill with friendly names: the **DEF** dropdown in the top bar is the default speaker (used by any alarm without its own), and each alarm row ends with that alarm's own dropdown. Picking a speaker saves immediately. Manual entry still works too (entities **Alarm Speaker** and **Alarm 1–4 Speaker**; leave an alarm's entry empty to use the default).
 
+**If the alarm screen appears but nothing plays**, check **"Allow the device to perform Home Assistant actions"** on the device page in Home Assistant (step above). With it off, nothing reports an error: the ESP32 sends the action, Home Assistant drops it, and the alarm screen still comes up. To confirm the alarm fired at all, look for `[I][alarm]: alarm N fired -> media_player.…` in the logs.
+
 Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = the token is wrong or was revoked; `HA UNREACHABLE` = wrong HA URL / use the IP; `NO SPEAKERS FOUND` = HA has no `media_player` entities (add the Google Cast / Sonos / etc. integration first).
 
 > **Security note:** a long-lived token grants full access to your Home Assistant and is stored in the device's flash. Treat it like a password and keep the device on a trusted network — the firmware only uses it for this read-only speaker query.
+>
+> Worth knowing: ESPHome's `web_server` returns the raw value of a `mode: password` text entity in the JSON `value` field even though it masks `state`, and the web server has no authentication. Anyone on your LAN can therefore read the token from `http://<device>/events`. This is an upstream ESPHome issue, present in 2026.8.1. If your network is not one you trust, leave the token unset and type the speaker entity ids by hand instead.
 
 ## Aircraft type silhouettes and specs
 
@@ -202,9 +206,13 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 2. 開啟裝置網頁 `http://flight-radar.local`(或 HA 的裝置頁),把權杖貼進 **HA Token**。**HA URL** 可以留空——預設 `http://homeassistant.local:8123`;若之後掃描顯示 `HA UNREACHABLE`,請改填 HA 的 IP(如 `http://192.168.1.10:8123`,mDNS 名稱解析在部分網路不可靠)。兩個欄位都會存進 flash,重開機不會消失。
 3. 開啟鬧鐘頁——權杖填好後**進頁會自動掃描**(也可按頂列的 **SCAN**)。所有喇叭下拉選單會列出友善名稱:頂列 **DEF** 選單是預設喇叭(沒有專屬喇叭的鬧鐘用它),每組鬧鐘列尾則是該組的專屬選單。挑了就立即存檔。仍然可以手動填寫(實體 **Alarm Speaker** 與 **Alarm 1–4 Speaker**;某組留空 = 用預設)。
 
+**如果鬧鐘畫面有跳出來、卻沒有聲音**,請檢查 Home Assistant 裝置頁的「**允許此裝置執行 Home Assistant 動作**」(見前面步驟)。這個開關關著的時候三邊都不會報錯:ESP32 送出動作、Home Assistant 靜默丟棄,鬧鐘畫面照樣跳出來。要確認鬧鐘到底有沒有觸發,看 log 裡有沒有 `[I][alarm]: alarm N fired -> media_player.…`。
+
 疑難排解:`SET HA TOKEN FIRST` = 還沒做第 2 步;`TOKEN INVALID` = 權杖錯誤或已撤銷;`HA UNREACHABLE` = HA URL 不對,改用 IP;`NO SPEAKERS FOUND` = HA 裡沒有任何 `media_player` 實體(先新增 Google Cast / Sonos 等整合)。
 
 > **安全性提醒:**長期權杖等同 HA 的完整存取權,且儲存在裝置 flash 中。請把它當密碼看待、讓裝置留在信任的內網;韌體只會用它做這個唯讀的喇叭查詢。
+>
+> 另外要知道:ESPHome 的 `web_server` 雖然把 `mode: password` 文字實體的 `state` 遮罩掉,卻仍以原文輸出 JSON 的 `value` 欄位,而網頁伺服器預設沒有認證。因此**同一區網上的任何人都能從 `http://<裝置>/events` 讀到這個權杖**。這是 ESPHome 上游的問題,2026.8.1 仍存在。若你的網路環境不完全可信,請不要設定權杖,改用手動輸入喇叭實體 id。
 
 ## 機型輪廓與規格
 
