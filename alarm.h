@@ -42,7 +42,9 @@ inline uint32_t add_h(uint32_t a, int d)   { return pack(en(a), dow(a), (hh(a) +
 inline uint32_t add_m(uint32_t a, int d)   { return pack(en(a), dow(a), hh(a), (mm(a) + d + 60) % 60); }
 inline uint32_t set_h(uint32_t a, int h)   { return pack(en(a), dow(a), h, mm(a)); }
 inline uint32_t set_m(uint32_t a, int m)   { return pack(en(a), dow(a), hh(a), m); }
-inline uint32_t toggle_day(uint32_t a, int k) {   // k=0..6 (一..日)
+// k=0..6,週日起算(0=Sun … 6=Sat)—— 與 day_on()、iso_today() 同一套索引,
+// 也與鬧鐘頁上 Su…Sa 的按鈕順序一致。改成週一起算會讓鬧鐘整整早響一天。
+inline uint32_t toggle_day(uint32_t a, int k) {
   return pack(en(a), dow(a) ^ (uint8_t)(1u << k), hh(a), mm(a));
 }
 inline bool day_on(uint32_t a, int k) { return (dow(a) >> k) & 1u; }
