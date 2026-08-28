@@ -120,6 +120,20 @@ coordinates on first boot, from [flight-radar-maps](https://github.com/delphicch
 and stores them in flash. A prebuilt image works anywhere; the screen shows
 `DOWNLOADING MAP` under the callsign while it fetches.
 
+**A near-empty map is usually correct.** The tiles carry coastline, country, state and
+county/district lines and nothing else, so somewhere inland with no coast or state border
+nearby genuinely has very little to draw — at a small radar range that can come down to one
+or two county lines crossing the screen. Check the **SYS** page before assuming it broke: the
+`MAP` line reads `MAP 2t 3075p 46nr` — tiles stored, outline points stored, and points inside
+the current radar range. A healthy point count with a tiny `nr` means the map is fine and the
+range is just small, so turn the range up. `MAP none` is the real fault: nothing valid in the
+maps partition, i.e. the download or the flash write failed.
+
+The device re-downloads only when your coordinates (to one decimal place) or the detail level
+change, so raising the range past 100 km or 250 km fetches a coarser set once. To force a
+refresh after the hosted tiles have been regenerated, nudge the home latitude or longitude by
+0.1°, wait for `DOWNLOADING MAP` to finish, then set it back.
+
 The rest of this section is for **baking a map into your own build** instead — finer detail than
 the hosted tiles, your own boundary file, or airspace for a country the tiles do not cover
 (they carry no airspace outside Taiwan, because openAIP data is CC BY-NC and not ours to
@@ -274,6 +288,16 @@ automation:
 **你什麼都不用做。** 韌體第一次開機就會依你的座標,從
 [flight-radar-maps](https://github.com/delphicchen/flight-radar-maps) 下載對應的圖磚存進 flash,
 預編韌體在任何地方都能用;抓取期間呼號下方會顯示 `DOWNLOADING MAP`。
+
+**地圖看起來幾乎空白,通常是正常的。** 圖磚只有海岸線、國界、州/省界與縣市/郡界四種線,
+內陸地區附近沒有海岸也沒有州界時,本來就沒什麼可畫 —— 半徑設得小的時候,畫面上可能就只有
+一兩條郡界穿過去。認定它壞掉之前先看 **SYS** 頁:`MAP` 那行是 `MAP 2t 3075p 46nr`,依序為
+圖磚數、存下來的輪廓點數、目前雷達半徑內的點數。點數正常而 `nr` 很小,代表地圖沒問題、只是
+半徑太小,把半徑調大即可。真正的故障是 `MAP none` —— 分割區裡沒有有效地圖,下載或寫入失敗。
+
+只有座標(取到小數一位)或細節層級改變時才會重新下載,所以半徑跨過 100 km 或 250 km 會換一次
+較粗的圖磚。線上圖磚更新後想強制重抓,把家的緯度或經度調動 0.1° 以上,等 `DOWNLOADING MAP`
+跑完再改回來即可。
 
 以下這節是給**想把地圖烤進自己的編譯版**的人:需要比線上圖磚更細的細節、想用自己的邊界檔,
 或需要圖磚沒有涵蓋的空域(台灣以外沒有空域資料,因為 openAIP 是 CC BY-NC,我們不能代為散布)。
