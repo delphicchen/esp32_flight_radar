@@ -24,6 +24,17 @@ out first, because that is the part that costs you time.
 
 ### Fixed
 
+- **Tapping a crowded area selected the wrong aircraft, and on 1024x600 the icon
+  sat 4 px left and 3 px high of its own track.** The mark container carries the
+  callsign label, so its hit area is far wider than the symbol and a neighbour's
+  label often covers the aircraft you aimed at; the tap now picks the track
+  closest to the touch point (within RS(48)) and only falls back to the slot that
+  was hit. The icon offset is the other half of the same complaint: `plane.png` is
+  a fixed 28x28 image that is deliberately not scaled, while the container anchor
+  and the ATC square both follow `RADAR_SCALE`, so the YAML's `RS(6)` put the icon
+  centre off the anchor on the 1024x600 layout. The icon is now positioned from
+  the anchor instead. The 800x480 layout is unchanged, pixel for pixel. Reported
+  by @CaptainJi in #12, reimplemented here against the current tree.
 - **Connection failures back off too, not just HTTP 429s.** adsb.lol often enforces
   its rate limit by dropping the TLS handshake mid-way (`CONN_EOF`) or aborting the
   connection instead of answering 429, so the v1.3.8 backoff never triggered and the

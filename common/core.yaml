@@ -473,8 +473,37 @@ script:
       slot: int
     then:
       - lambda: |-
-          if (slot < 0 || slot >= (int) id(slot_map).size()) return;
-          int i = id(slot_map)[slot];
+          // 點選改判「離觸點最近的航跡」:mark 容器裝著呼號標籤,熱區比圖示大得多,
+          // 兩機靠得近時常常是鄰機的標籤壓在上面,只信被點到的 slot 就會選錯。改成
+          // 拿觸點對所有圈內航機算距離取最近者(超過 RS(48) 才退回 slot,例如點在
+          // 呼號的遠端)。外插算法與畫面同一套,選取才不會跟眼睛看到的差一拍。
+          int i = -1;
+          {
+            lv_indev_t *indev = lv_indev_get_act();
+            lv_point_t pt{0, 0};
+            if (indev) lv_indev_get_point(indev, &pt);
+            float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+            float rng = id(radar_range).state;
+            float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+            float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
+            if (dt > 180.0f) dt = 180.0f;
+            int best_d2 = RS(48) * RS(48) + 1;
+            for (int k = 0; k < (int) id(ac_lat).size(); k++) {
+              float rad = id(ac_trk)[k] * 3.14159265f / 180.0f;
+              float vkm = id(ac_vel)[k] * dt / 1000.0f;
+              float e  = (id(ac_lon)[k] - lon0) * 111.320f * coslat + vkm * sinf(rad);
+              float no = (id(ac_lat)[k] - lat0) * 110.574f          + vkm * cosf(rad);
+              if (e * e + no * no > rng * rng) continue;
+              int dx = RS(240) + (int) (e / rng * (float) RADAR_R) - (int) pt.x;
+              int dy = RS(240) - (int) (no / rng * (float) RADAR_R) - (int) pt.y;
+              int d2 = dx * dx + dy * dy;
+              if (d2 < best_d2) { best_d2 = d2; i = k; }
+            }
+          }
+          if (i < 0) {
+            if (slot < 0 || slot >= (int) id(slot_map).size()) return;
+            i = id(slot_map)[slot];
+          }
           if (i < 0 || i >= (int) id(ac_cs).size()) return;
           id(spec_on) = false;   // 換機/取消選取都回到航班資訊(規格是上一台的)
           if (id(info_on)) {   // 點選飛機 → 退出系統資訊顯示
@@ -1201,6 +1230,16 @@ interval:
           float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
           if (dt > 180.0f) dt = 180.0f;   // 資料太舊就不再外插
           int n = id(ac_lat).size(), shown = 0;
+          // plane.png 是固定 28x28、不縮放的圖(見下方 lv_img_set_angle 一帶的說明),
+          // 但容器錨點和 ATC 方塊都跟著 RADAR_SCALE 走。1024 佈局上照 YAML 的 RS(6)
+          // 擺圖示,中心會比方塊中心偏左 4px、偏上 3px。改成從錨點反推圖示位置,
+          // 800 佈局結果與原本完全相同。
+          static bool ac_img_anchored = false;
+          if (!ac_img_anchored) {
+            for (int k = 0; k < AC_SLOTS; k++)
+              lv_obj_set_pos(imgs[k], RS(14) - 14, RS(20) - 14);
+            ac_img_anchored = true;
+          }
           float earr[AC_SLOTS], noarr[AC_SLOTS];
           bool selarr[AC_SLOTS];
           for (int i = 0; i < n && shown < AC_SLOTS; i++) {
@@ -1216,7 +1255,7 @@ interval:
             bool lside = atc && sinf(rad) > 0.0f;
             if ((uint8_t) lside != id(lbl_side)[shown]) {
               id(lbl_side)[shown] = lside ? 1 : 0;
-              lv_obj_set_pos(imgs[shown], lside ? RS(94) : 0, RS(6));
+              lv_obj_set_pos(imgs[shown], (lside ? RS(108) : RS(14)) - 14, RS(20) - 14);
               lv_obj_set_pos(sqs[shown], lside ? RS(105) : RS(11), RS(17));
               if (lside) {
                 lv_obj_set_width(dbs[shown], RS(88));
