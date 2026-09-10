@@ -36,13 +36,20 @@ https://delphicchen.github.io/flight-radar-maps/v1/L2/N50E010.bin
 header  magic "FRMT" | u16 ver | u16 flags | u32 crc32(payload)
         f32 cell_lat0, cell_lon0 | u8 level | u8 layers | u16 reserved
         u32 off/len x5  (outline, airports, runways, fixes, airspaces+strtab)
-outline    f32 lat,lon 交錯;lat=NaN 為分隔,lon 帶 kind(0海岸/1國界/2州界)
+outline    f32 lat,lon 交錯;lat=NaN 為分隔,lon 帶 kind
+           (0海岸/1國界/2州界/3縣市郡/4河流/5公路/6鐵路)
 airports   char icao[5] + f32 lat,lon
 runways    f32 lat1,lon1,lat2,lon2,xlat1,xlon1,xlat2,xlon2
 fixes      char name[6] + f32 lat,lon
 airspaces  u8 cls | u16 npts | u16 name_off(指字串表) | 之後接 npts 組 f32 lat,lon
 ```
 `MapAirspace.name` 現在是 `const char *` 指向 rodata,改成指進解析後的字串表。
+
+額外輪廓層(自建圖磚,官方 CDN 仍只有海岸/國界/州界+既有 detail pack):
+- `--cities` 用 DataV 中國地級市界,kind 與 `--add-geojson FILE:3` 相同(縣/郡/市)。
+  產生時會去掉與海岸/國界/省界重合的邊(共用邊只留一份),末端仍接到岸。
+- `--add-geojson` 維持 `FILE[:KIND]`,KIND 0–3 使用中;4–6 留給之後的河/路/鐵 UI 開關。
+- `make_tiles.py` 單張圖磚 ≥ 128 KB 會警告:韌體 `maps` 分割區只有 512 KB,500 km 可能同時載入約 4 格。
 
 ## 裝置端
 - **分割表**:app0/app1 各 0x7C0000(7.75 MB)但韌體只用 3.23 MB。兩邊各縮到 0x500000(5 MB),
