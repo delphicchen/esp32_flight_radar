@@ -5061,9 +5061,10 @@ lvgl:
                            id(radar_range).state * (id(units_imperial) ? 0.6214f : 1.0f));
                   lv_textarea_set_text((lv_obj_t *) id(ta_rng), b);
                   lv_label_set_text(id(rng_unit_l), id(units_imperial) ? "mi" : "km");
-                  // 單一 POLL 欄位:顯示目前 SRC 對應的間隔
-                  snprintf(b, sizeof(b), "%.0f", id(data_src) == 0 ? id(poll_interval).state
-                                                                   : id(poll_interval_alt).state);
+                  // 單一 POLL 欄位:顯示 NVS 存值(MERGE 的 45s 下限只在執行期 effective_poll_s 夾)
+                  snprintf(b, sizeof(b), "%.0f",
+                           id(data_src) == 0 ? id(poll_interval).state
+                                            : id(poll_interval_alt).state);
                   lv_textarea_set_text((lv_obj_t *) id(ta_poll), b);
                   // SRC 下拉與 data_src 同步
                   lv_dropdown_set_selected(id(src_dd)->obj, id(data_src));
@@ -5694,8 +5695,8 @@ lvgl:
                            id(radar_range).state * (imp ? 0.6214f : 1.0f));
                   lv_textarea_set_text((lv_obj_t *) id(ta_rng), rb);
                   lv_label_set_text(id(rng_unit_l), imp ? "mi" : "km");
-        # 航班資料來源(下拉三選一;OpenSky 失敗自動 fallback 到免費來源 10 分鐘)
-        # options 的 index 必須對齊 data_src:0=OpenSky 1=airplanes.live 2=adsb.lol
+        # 航班資料來源(下拉;OpenSky 失敗自動 fallback 到免費來源 10 分鐘)
+        # options 的 index 必須對齊 data_src:0=OpenSky 1=airplanes.live 2=adsb.lol 3=adsb.fi 4=MERGE
         - label: { x: 30, y: 252, text: "ADS-B SRC", text_font: font_small, text_color: 0x9AE6B4 }
         - dropdown:
             id: src_dd
@@ -5722,16 +5723,19 @@ lvgl:
               - "OPENSKY"
               - "A.LIVE"
               - "ADSB.LOL"
+              - "ADSB.FI"
+              - "MERGE"
             on_value:
               - lambda: |-
                   int i = (int) x;
                   if (i == id(data_src)) return;   // set_selected 會回打,值沒變就跳過
                   id(data_src) = i;
                   radar_bg::g_os_cooldown_until = 0;   // 手動選來源即重置 fallback 冷卻
-                  // POLL 欄位自動匹配新來源的間隔
+                  // POLL 欄位自動匹配新來源的 NVS 存值(不把 MERGE 執行期下限寫進欄位)
                   char pb[8];
-                  snprintf(pb, sizeof(pb), "%.0f", i == 0 ? id(poll_interval).state
-                                                          : id(poll_interval_alt).state);
+                  snprintf(pb, sizeof(pb), "%.0f",
+                           i == 0 ? id(poll_interval).state
+                                  : id(poll_interval_alt).state);
                   lv_textarea_set_text((lv_obj_t *) id(ta_poll), pb);
         # 手搓數字鍵盤(與整體風格一致)
         - button:

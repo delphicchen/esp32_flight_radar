@@ -1,18 +1,19 @@
-# PLAN_SOURCES — 資料來源選擇 + fallback(airplanes.live / adsb.lol)
+# PLAN_SOURCES — 資料來源選擇 + fallback(adsb.lol / adsb.fi / airplanes.live)
 
 ## 目標
-- 設定頁可選資料來源:OpenSky(預設)/ airplanes.live / adsb.lol。
+- 設定頁可選資料來源:OpenSky(預設)/ airplanes.live / adsb.lol / adsb.fi / MERGE。
 - OpenSky 失敗(token 失敗、401/429、非 200)時自動 fallback 到免費來源,10 分鐘後再回試。
 - 免費來源有獨立的 polling interval(POLL2),因為它們免金鑰、無每日額度,可以抓得比 OpenSky 密。
+- MERGE 一輪打多家 HTTPS,最低間隔夾到 45 s,且 OpenSky 失敗同樣走 600 s 冷卻。
 
-## API 事實(兩個免費來源格式相同,readsb /v2 風格)
-| | OpenSky(現況) | airplanes.live | adsb.lol |
-|---|---|---|---|
-| URL | states/all?lamin=… | `https://api.airplanes.live/v2/point/{lat}/{lon}/{r}` | `https://api.adsb.lol/v2/point/{lat}/{lon}/{r}` |
-| 認證 | OAuth2 client credentials | 無 | 無 |
-| 額度 | 4000 credits/日 | rate limit 約 1 req/s | 無明示,合理使用 |
-| 半徑 | bbox(度) | **海里**,上限 250 nm(=463 km) | 同左 |
-| 單位 | m、m/s | **英尺、節、ft/min** | 同左 |
+## API 事實(免費來源格式相同,readsb 風格)
+| | OpenSky(現況) | airplanes.live | adsb.lol | adsb.fi |
+|---|---|---|---|---|
+| URL | states/all?lamin=… | `https://api.airplanes.live/v2/point/{lat}/{lon}/{r}` | `https://api.adsb.lol/v2/point/{lat}/{lon}/{r}` | `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{r}` |
+| 認證 | OAuth2 client credentials | 無 | 無 | 無 |
+| 額度 | 4000 credits/日 | rate limit 約 1 req/s | 無明示,合理使用 | 無明示,合理使用 |
+| 半徑 | bbox(度) | **海里**,上限 250 nm(=463 km) | 同左 | 同左 |
+| 單位 | m、m/s | **英尺、節、ft/min** | 同左 | 同左 |
 
 回應 JSON:`{"ac":[{hex, flight, lat, lon, alt_baro, gs, track, baro_rate, seen, …}], "now": epoch_ms}`
 - `alt_baro` 可能是字串 `"ground"` → 視同 on_ground 跳過。
@@ -22,10 +23,11 @@
 - 半徑:`range_km / 1.852`,clamp 250 nm(RANGE 最大 500 km 略超 463 km,超過就吃 clamp,估算列註明)。
 
 ## 設計
-- global `data_src`(int 0/1/2,restore NVS)= 主要來源。
-- number `poll_interval_alt`(5–300 s,預設 15,restore NVS)= 免費來源用的間隔;OpenSky 仍用原 `poll_interval`。
-- **fallback**:`data_src==0` 且 OpenSky 該輪失敗 → 同輪直接改抓 airplanes.live,失敗再試 adsb.lol;
+- global `data_src`(int 0/1/2/3/4,restore NVS)= 主要來源。0=OpenSky 1=A.LIVE 2=ADSB.LOL 3=ADSB.FI 4=MERGE。
+- number `poll_interval_alt`(5–300 s,預設 15,restore NVS)= 免費來源用的間隔;OpenSky 仍用原 `poll_interval`;MERGE 再夾到最低 45 s。
+- **fallback**:`data_src==0` 且 OpenSky 該輪失敗 → 同輪改抓 adsb.lol,失敗再試 adsb.fi,最後 airplanes.live;
   並設 `g_os_cooldown_until`(10 分鐘),冷卻中節拍器改用 POLL2 間隔、bg task 直接抓免費來源,到期回試 OpenSky。
+  MERGE 路徑對 OpenSky 用同一套冷卻,避免額度用完還每輪白打。
 - `SET OPENSKY CREDENTIALS` 擋門只在 `data_src==0` 時生效;選免費來源完全不需要憑證。
 - 「目前實際來源」存 `g_last_src`,SYS 面板顯示(OpenSky 額度列在非 OpenSky 時顯示來源名)。
 

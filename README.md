@@ -62,9 +62,10 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 ### What it does
 
 - **Live flight radar** — up to 40 aircraft from [OpenSky](https://opensky-network.org/),
-  [airplanes.live](https://airplanes.live/) or [adsb.lol](https://adsb.lol/), with a rotating
-  sweep and a glow as the beam passes each target. Switch source on screen; OpenSky failures
-  fall back to the free APIs automatically.
+  [adsb.lol](https://adsb.lol/), [adsb.fi](https://www.adsb.fi/) or
+  [airplanes.live](https://airplanes.live/) (plus a MERGE mode that de-duplicates them),
+  with a rotating sweep and a glow as the beam passes each target. Switch source on screen;
+  OpenSky failures fall back to the free APIs automatically.
 - **Tap any aircraft** for origin → destination, squawk (red on 7500/7600/7700), altitude,
   speed, heading, vertical rate, distance and ICAO type.
 - **Tap the type badge** for the airframe itself: a bright-yellow top-down silhouette drawn
@@ -129,8 +130,9 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
 ### 它能做什麼
 
 - **即時航班雷達** —— 從 [OpenSky](https://opensky-network.org/)、
-  [airplanes.live](https://airplanes.live/) 或 [adsb.lol](https://adsb.lol/) 取得最多 40 架
-  航班,掃描線轉到時目標會亮起。資料來源可在螢幕上切換,OpenSky 失敗會自動退回免金鑰的來源。
+  [adsb.lol](https://adsb.lol/)、[adsb.fi](https://www.adsb.fi/) 或
+  [airplanes.live](https://airplanes.live/) 取得最多 40 架航班(也可選 MERGE 多源去重合併),
+  掃描線轉到時目標會亮起。資料來源可在螢幕上切換,OpenSky 失敗會自動退回免金鑰的來源。
 - **點選任一航班** 顯示起訖機場、squawk(7500/7600/7700 轉紅)、高度、速度、航向、
   升降率、距離與 ICAO 機型代碼。
 - **點機型徽章** 看這台飛機本身:亮黃色俯視輪廓(依真實翼展等比縮放、以掃描線方式現形),
@@ -188,8 +190,9 @@ ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
 ### 它能做什么
 
 - **实时航班雷达** —— 从 [OpenSky](https://opensky-network.org/)、
-  [airplanes.live](https://airplanes.live/) 或 [adsb.lol](https://adsb.lol/) 获取最多 40 架
-  航班,扫描线转到时目标会亮起。数据源可在屏幕上切换,OpenSky 失败会自动退回免密钥的来源。
+  [adsb.lol](https://adsb.lol/)、[adsb.fi](https://www.adsb.fi/) 或
+  [airplanes.live](https://airplanes.live/) 获取最多 40 架航班(也可选 MERGE 多源去重合并),
+  扫描线转到时目标会亮起。数据源可在屏幕上切换,OpenSky 失败会自动退回免密钥的来源。
 - **点选任一航班** 显示起讫机场、squawk(7500/7600/7700 转红)、高度、速度、航向、
   升降率、距离与 ICAO 机型代码。
 - **点机型徽章** 看这台飞机本身:亮黄色俯视轮廓(依真实翼展等比缩放、以扫描线方式现形),
@@ -244,7 +247,7 @@ ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
 
 ## Data sources & credits / 資料來源與致謝 / 数据来源与致谢
 
-- Aircraft states — [OpenSky Network](https://opensky-network.org/), [airplanes.live](https://airplanes.live/), [adsb.lol](https://adsb.lol/)
+- Aircraft states — [OpenSky Network](https://opensky-network.org/), [airplanes.live](https://airplanes.live/), [adsb.lol](https://adsb.lol/), [adsb.fi](https://www.adsb.fi/)
 - Route and aircraft-type lookup — [adsbdb.com](https://www.adsbdb.com/)
 - Aircraft silhouettes — [plane-watch/pw-silhouettes](https://github.com/plane-watch/pw-silhouettes) (CC BY-NC-SA 4.0); airframes it does not cover (the 747 family) are drawn from published dimensions by `tools/make_local_silhouettes.py`
 - Type designators, operators, ICAO24 allocations — ICAO Doc 8643 / Doc 8585 / Annex 10 via [rikgale/ICAOList](https://github.com/rikgale/ICAOList)

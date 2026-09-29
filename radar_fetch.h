@@ -122,8 +122,8 @@ struct AcInfo {
   uint32_t lc;   // last_contact (epoch 秒),ATC 模式判斷訊號延遲用
   std::string cs;
   std::string sq;   // squawk / mode-A code(三家來源都有;OpenSky 是 states[14])
-  std::string ty;   // ICAO 機型代碼(如 B738);只有 airplanes.live / adsb.lol 提供
-  // 以下四項只有 readsb v2(airplanes.live / adsb.lol)有,OpenSky 全部留空/0。
+  std::string ty;   // ICAO 機型代碼(如 B738);readsb 來源才有,OpenSky 沒有
+  // 以下四項只有 readsb(airplanes.live / adsb.lol / adsb.fi)有,OpenSky 全部留空/0。
   std::string reg;  // 註冊號(如 B-5416)
   std::string desc; // 機型全名(如 BOEING 737-800);aircraft_db 查不到時的後備
   std::string cat;  // ADS-B 發射器類別(A1~A7 / B1~B7 / C1~C3),查不到機型時的通用輪廓
@@ -136,7 +136,7 @@ struct Job {
              // 8 = 下載地圖圖磚
   std::string cid, sec, callsign;
   float lat, lon, range;
-  int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
+  int src;   // 0=OpenSky 1=airplanes.live 2=adsb.lol 3=adsb.fi 4=MERGE
 };
 
 // ---- task → main 的結果(g_states_ready/g_route_ready 當柵欄)----
@@ -169,16 +169,38 @@ inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token
 inline volatile int g_os_remaining = -1;   // OpenSky X-Rate-Limit-Remaining(-1=未知)
 inline bool g_want_rl = false;             // 只在 states 請求期間擷取(bg task 序列執行,無競態)
 inline volatile uint32_t g_os_cooldown_until = 0;  // OpenSky 失敗冷卻期限(millis 秒),期間走免費來源
-inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(0/1/2,-1=尚未成功)
-// 免費 v2 來源的 429 退避:冷卻期限(millis 秒)+ 目前的懲罰秒數(成功後歸位)。
+inline volatile int g_last_src = -1;       // 最近一次成功抓取的來源(0..4,-1=尚未成功)
+inline volatile int g_fetched_n = 0;       // 裁切 AC_SLOTS 前的架數(狀態列 AC: 用)
+// 免費 readsb 來源的 429 退避:冷卻期限(millis 秒)+ 目前的懲罰秒數(成功後歸位)。
+// 索引對齊 src:1=airplanes.live 2=adsb.lol 3=adsb.fi(0 不用)。
 // OpenSky 掛掉退到免費來源時,節奏是 poll_interval_alt 的 15 秒,曾把 adsb.lol
 // 撞到回 429;繼續用固定間隔撞牆只會讓限速更久才解除,所以收到 429 就指數退避。
-inline volatile uint32_t g_v2_cooldown_until[3] = {0, 0, 0};
-inline uint32_t g_v2_penalty_s[3] = {60, 60, 60};
-inline uint8_t g_v2_consec_fail[3] = {0, 0, 0};  // 連續連線失敗數(成功歸零)
+inline volatile uint32_t g_v2_cooldown_until[4] = {0, 0, 0, 0};
+inline uint32_t g_v2_penalty_s[4] = {60, 60, 60, 60};
+inline uint8_t g_v2_consec_fail[4] = {0, 0, 0, 0};  // 連續連線失敗數(成功歸零)
 // 429 之外,adsb.lol 被限速時更常直接把 TLS 交握切線(st=-1、CONN_EOF)或
 // ECONNABORTED —— 不回狀態碼,光認 429 攔不住。連續兩次連線失敗就套同一組
 // 指數退避:少打不只少撞牆,Wi-Fi TX 爆發變稀也同時緩解面板抖動(EMI)。
+// MERGE 一輪打 3–4 次 HTTPS,不能跟單源共用 15 s;最低夾到 45 s。
+static const int MERGE_MIN_POLL_S = 45;
+
+inline int effective_poll_s(int src, int os_s, int alt_s, bool os_cooling) {
+  if (src == 0 && !os_cooling) return os_s;
+  int itv = alt_s;
+  if (src == 4 && itv < MERGE_MIN_POLL_S) itv = MERGE_MIN_POLL_S;
+  return itv;
+}
+
+inline const char *src_name(int src) {
+  switch (src) {
+    case 1: return "A.LIVE";
+    case 2: return "ADSB.LOL";
+    case 3: return "ADSB.FI";
+    case 4: return "MERGE";
+    case 0: return "OPENSKY";
+    default: return "----";
+  }
+}
 
 // HTTP body 上限。150KB 太緊:250km 半徑在繁忙空域(英國、日本)的航班清單就會
 // 超過,回應被截斷後解析必定失敗。字串配在 PSRAM,384KB 對 8MB PSRAM 綽綽有餘,
@@ -306,7 +328,9 @@ inline bool ensure_token(const Job &j) {
   return true;
 }
 
-inline bool do_states_opensky(const Job &j) {
+inline void publish_states(std::vector<AcInfo> &&acs, int src);
+
+inline bool fetch_opensky(const Job &j, std::vector<AcInfo> &out) {
   if (!ensure_token(j)) return false;
   float coslat = cosf(j.lat * 3.14159265f / 180.0f);
   float dlat = j.range / 110.574f;
@@ -324,7 +348,6 @@ inline bool do_states_opensky(const Job &j) {
     ESP_LOGW("radar_bg", "states failed: %d (%u bytes)", st, (unsigned) r.size());
     return false;
   }
-  std::vector<AcInfo> acs;
   float lat0 = j.lat, lon0 = j.lon;
   esphome::json::parse_json(r, [&](JsonObject root) -> bool {
     JsonArray sts = root["states"].as<JsonArray>();
@@ -351,30 +374,35 @@ inline bool do_states_opensky(const Job &j) {
       float e = (alon - lon0) * 111.320f * coslat;
       float n = (alat - lat0) * 110.574f;
       ac.dist = sqrtf(e * e + n * n);
-      acs.push_back(ac);
+      out.push_back(std::move(ac));
     }
     return true;
   });
-  std::sort(acs.begin(), acs.end(),
-            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
-  xSemaphoreTake(mtx(), portMAX_DELAY);
-  g_result = std::move(acs);
-  g_states_ready = true;
-  g_last_src = 0;
-  xSemaphoreGive(mtx());
   return true;
 }
 
-// airplanes.live / adsb.lol(readsb /v2/point,免金鑰):回傳英制,這裡換算回公制
+inline bool do_states_opensky(const Job &j) {
+  std::vector<AcInfo> acs;
+  if (!fetch_opensky(j, acs)) return false;
+  publish_states(std::move(acs), 0);
+  return true;
+}
+
+// airplanes.live / adsb.lol / adsb.fi(readsb JSON,免金鑰):回傳英制,這裡換算回公制
 // 使 UI/ATC 端與 OpenSky 完全同構;lc 由 now(epoch ms)- seen 還原成 last_contact
-inline bool do_states_v2(const Job &j, int src) {
+inline void v2_build_url(const Job &j, int src, char *url, size_t n) {
   float r_nm = j.range / 1.852f;
-  if (r_nm > 250.0f) r_nm = 250.0f;   // v2 API 半徑上限 250 nm(463 km)
-  char url[160];
-  snprintf(url, sizeof(url), "https://%s/v2/point/%.4f/%.4f/%.0f",
-           src == 2 ? "api.adsb.lol" : "api.airplanes.live", j.lat, j.lon, r_nm);
-  int st = 0;
-  std::string r = http_req(url, false, "", nullptr, "", st, 131072);
+  if (r_nm > 250.0f) r_nm = 250.0f;   // 半徑上限 250 nm(463 km)
+  if (src == 3)
+    snprintf(url, n, "https://opendata.adsb.fi/api/v3/lat/%.4f/lon/%.4f/dist/%.0f",
+             j.lat, j.lon, r_nm);
+  else
+    snprintf(url, n, "https://%s/v2/point/%.4f/%.4f/%.0f",
+             src == 2 ? "api.adsb.lol" : "api.airplanes.live", j.lat, j.lon, r_nm);
+}
+
+inline void v2_note_status(int src, int st) {
+  if (src < 1 || src > 3) return;
   if (st == 429) {
     // 被限速:指數退避 60→120→…→600s(封頂)。millis 秒與 g_os_cooldown_until 同款。
     uint32_t now = millis() / 1000;
@@ -386,23 +414,78 @@ inline bool do_states_v2(const Job &j, int src) {
     g_v2_penalty_s[src] = 60;   // 成功就歸位,下次從最短退避開始
     g_v2_consec_fail[src] = 0;
   }
-  if (st != 200 || r.empty()) {
+  if (st != 200 && st <= 0 && ++g_v2_consec_fail[src] >= 2) {
     // 連線層失敗(st<=0)連續兩次也退避:伺服器切線式限速不會給 429。
-    if (st <= 0 && ++g_v2_consec_fail[src] >= 2) {
-      uint32_t now = millis() / 1000;
-      g_v2_cooldown_until[src] = now + g_v2_penalty_s[src];
-      if (g_v2_penalty_s[src] < 600) g_v2_penalty_s[src] *= 2;
-      ESP_LOGW("radar_bg", "v2 states(src %d) connect fail x%u -- backing off %us",
-               src, (unsigned) g_v2_consec_fail[src], (unsigned) g_v2_penalty_s[src]);
-    }
-    ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
-    return false;
+    uint32_t now = millis() / 1000;
+    g_v2_cooldown_until[src] = now + g_v2_penalty_s[src];
+    if (g_v2_penalty_s[src] < 600) g_v2_penalty_s[src] *= 2;
+    ESP_LOGW("radar_bg", "v2 states(src %d) connect fail x%u -- backing off %us",
+             src, (unsigned) g_v2_consec_fail[src], (unsigned) g_v2_penalty_s[src]);
   }
-  std::vector<AcInfo> acs;
-  float lat0 = j.lat, lon0 = j.lon;
-  float coslat = cosf(j.lat * 3.14159265f / 180.0f);
-  esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+}
+
+inline void publish_states(std::vector<AcInfo> &&acs, int src) {
+  std::sort(acs.begin(), acs.end(),
+            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
+  g_fetched_n = (int) acs.size();           // 狀態列顯示抓到幾架
+  if (acs.size() > AC_SLOTS) acs.resize(AC_SLOTS);  // 畫面只有 40 槽,多的佔 PSRAM
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_result = std::move(acs);
+  g_states_ready = true;
+  g_last_src = src;
+  xSemaphoreGive(mtx());
+}
+
+// 依 ICAO24(hex)優先、否則呼號+近距離合併;較新/較完整的欄位覆蓋空欄
+inline void merge_into(std::vector<AcInfo> &dst, std::vector<AcInfo> &&src) {
+  std::map<uint32_t, size_t> by_hex;
+  for (size_t i = 0; i < dst.size(); i++) {
+    if (dst[i].hex != 0) by_hex[dst[i].hex] = i;
+  }
+  for (auto &a : src) {
+    int found = -1;
+    if (a.hex != 0) {
+      auto it = by_hex.find(a.hex);
+      if (it != by_hex.end()) found = (int) it->second;
+    }
+    if (found < 0 && !a.cs.empty() && a.cs != "?") {
+      for (size_t i = 0; i < dst.size(); i++) {
+        if (a.cs == dst[i].cs) {
+          float dlat = a.lat - dst[i].lat, dlon = a.lon - dst[i].lon;
+          if (dlat * dlat + dlon * dlon < 0.02f * 0.02f) { found = (int) i; break; }
+        }
+      }
+    }
+    if (found < 0) {
+      if (a.hex != 0) by_hex[a.hex] = dst.size();
+      dst.push_back(std::move(a));
+      continue;
+    }
+    AcInfo &t = dst[(size_t) found];
+    bool newer = a.lc >= t.lc;
+    if (newer) {
+      t.lat = a.lat; t.lon = a.lon; t.trk = a.trk; t.vel = a.vel;
+      t.alt = a.alt; t.vr = a.vr; t.dist = a.dist; t.lc = a.lc;
+    }
+    if (t.hex == 0 && a.hex != 0) {
+      t.hex = a.hex;
+      by_hex[t.hex] = (size_t) found;
+    }
+    if (t.sq.empty() && !a.sq.empty()) t.sq = std::move(a.sq);
+    if (t.ty.empty() && !a.ty.empty()) t.ty = std::move(a.ty);
+    if (t.reg.empty() && !a.reg.empty()) t.reg = std::move(a.reg);
+    if (t.desc.empty() && !a.desc.empty()) t.desc = std::move(a.desc);
+    if (t.cat.empty() && !a.cat.empty()) t.cat = std::move(a.cat);
+    if ((t.cs.empty() || t.cs == "?") && !a.cs.empty()) t.cs = std::move(a.cs);
+  }
+}
+
+inline bool parse_readsb_json(const std::string &r, float lat0, float lon0,
+                              std::vector<AcInfo> &out) {
+  float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+  return esphome::json::parse_json(r, [&](JsonObject root) -> bool {
     uint32_t now_s = (uint32_t) ((root["now"] | 0.0) / 1000.0);
+    if (now_s == 0) return false;   // 沒有 now 就不要猜 lc,ATC 延遲判斷會歪
     JsonArray arr = root["ac"].as<JsonArray>();
     if (arr.isNull()) return true;
     for (JsonVariant v : arr) {
@@ -420,8 +503,8 @@ inline bool do_states_v2(const Job &j, int src) {
       float seen = a["seen"] | 0.0f;
       ac.lc = now_s > (uint32_t) seen ? now_s - (uint32_t) seen : 0;
       ac.sq = a["squawk"] | "";
-      ac.ty = a["t"] | "";     // ICAO 機型代碼
-      ac.reg = a["r"] | "";    // 註冊號
+      ac.ty = a["t"] | "";
+      ac.reg = a["r"] | "";
       ac.desc = a["desc"] | "";
       ac.cat = a["category"] | "";
       ac.hex = (uint32_t) strtoul(a["hex"] | "0", nullptr, 16);
@@ -432,38 +515,83 @@ inline bool do_states_v2(const Job &j, int src) {
       float e = (alon - lon0) * 111.320f * coslat;
       float n = (alat - lat0) * 110.574f;
       ac.dist = sqrtf(e * e + n * n);
-      acs.push_back(ac);
+      out.push_back(std::move(ac));
     }
     return true;
   });
-  std::sort(acs.begin(), acs.end(),
-            [](const AcInfo &a, const AcInfo &b) { return a.dist < b.dist; });
-  xSemaphoreTake(mtx(), portMAX_DELAY);
-  g_result = std::move(acs);
-  g_states_ready = true;
-  g_last_src = src;
-  xSemaphoreGive(mtx());
+}
+
+inline bool fetch_states_v2(const Job &j, int src, std::vector<AcInfo> &out) {
+  uint32_t now = millis() / 1000;
+  if (now < g_v2_cooldown_until[src]) return false;
+  char url[192];
+  v2_build_url(j, src, url, sizeof(url));
+  int st = 0;
+  std::string r = http_req(url, false, "", nullptr, "", st, 131072);
+  v2_note_status(src, st);
+  if (st != 200 || r.empty()) {
+    ESP_LOGW("radar_bg", "v2 states(src %d) failed: %d (%u bytes)", src, st, (unsigned) r.size());
+    return false;
+  }
+  return parse_readsb_json(r, j.lat, j.lon, out);
+}
+
+inline bool do_states_v2(const Job &j, int src) {
+  std::vector<AcInfo> acs;
+  if (!fetch_states_v2(j, src, acs)) return false;
+  publish_states(std::move(acs), src);
   return true;
 }
 
+// 多源合併:OpenSky(有憑證時)+ADSB.LOL+ADSB.FI+A.LIVE,按 hex 去重補欄。
+// 各免費源沿用同一套 429/CONN_EOF 指數退避,冷卻中的來源本輪直接跳過。
+inline void do_states_merge(const Job &j) {
+  std::vector<AcInfo> all, part;
+  int ok_n = 0;
+  if (!j.cid.empty() && !j.sec.empty()) {
+    uint32_t now = millis() / 1000;
+    if (now >= g_os_cooldown_until) {
+      part.clear();
+      if (fetch_opensky(j, part)) {
+        g_os_cooldown_until = 0;
+        merge_into(all, std::move(part));
+        ok_n++;
+      } else {
+        g_os_cooldown_until = now + 600;
+        ESP_LOGW("radar_bg", "opensky failed in merge, cooling 600s");
+      }
+    }
+  }
+  part.clear();
+  if (fetch_states_v2(j, 2, part)) { merge_into(all, std::move(part)); ok_n++; }
+  part.clear();
+  if (fetch_states_v2(j, 3, part)) { merge_into(all, std::move(part)); ok_n++; }
+  part.clear();
+  if (fetch_states_v2(j, 1, part)) { merge_into(all, std::move(part)); ok_n++; }
+  if (ok_n == 0) {
+    ESP_LOGW("radar_bg", "merge: all sources failed");
+    return;
+  }
+  ESP_LOGI("radar_bg", "merge: %d sources ok, %u aircraft", ok_n, (unsigned) all.size());
+  publish_states(std::move(all), 4);
+}
+
 inline void do_states(const Job &j) {
-  if (j.src == 1 || j.src == 2) { do_states_v2(j, j.src); return; }
-  // OpenSky 主線:冷卻中直接走免費來源;失敗設 10 分鐘冷卻,到期自動回試
+  if (j.src == 4) { do_states_merge(j); return; }
+  if (j.src == 1 || j.src == 2 || j.src == 3) { do_states_v2(j, j.src); return; }
   uint32_t now = millis() / 1000;
   if (now >= g_os_cooldown_until) {
     if (do_states_opensky(j)) { g_os_cooldown_until = 0; return; }
     g_os_cooldown_until = now + 600;
     ESP_LOGW("radar_bg", "opensky failed, fallback to free sources for 600s");
   }
-  // adsb.lol 先試,airplanes.live 當第二順位:後者自 2026-08-13 起關閉公開 API,
-  // 對所有人一律 403(不是我們被封)。原本的順序等於每一輪都先浪費一次必定失敗
-  // 的 TLS 連線,才輪到真正能用的來源 —— 也讓 adsb.lol 更容易撞到它的速率限制。
-  // 保留它當第二順位:如果哪天恢復開放,不必改碼就會自己回來。
-  // 429 冷卻中的來源直接跳過,不發請求(退避由 do_states_v2 記帳)。
+  // adsb.lol 先試,adsb.fi 次之,airplanes.live 墊底(公開 API 自 2026-08-13 起常 403)。
+  // 429 冷卻中的來源直接跳過,不發請求(退避由 fetch_states_v2 記帳)。
   uint32_t now2 = millis() / 1000;
-  bool skip2 = now2 < g_v2_cooldown_until[2];
-  if (!skip2 && !do_states_v2(j, 2) && now2 >= g_v2_cooldown_until[1])
-    do_states_v2(j, 1);   // adsb.lol → airplanes.live
+  if (now2 >= g_v2_cooldown_until[2] && do_states_v2(j, 2)) return;
+  if (now2 >= g_v2_cooldown_until[3] && do_states_v2(j, 3)) return;
+  if (now2 >= g_v2_cooldown_until[1])
+    do_states_v2(j, 1);
 }
 
 inline void do_route(const Job &j) {
@@ -1981,7 +2109,7 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
   if (radar_bg::g_last_src > 0)   // 免費來源(手選或 fallback):無額度,顯示來源名
     snprintf(b, sizeof(b), "UP %ud %02u:%02u   SRC %s", (unsigned) (up / 86400),
              (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
-             radar_bg::g_last_src == 2 ? "ADSB.LOL" : "A.LIVE");
+             radar_bg::src_name(radar_bg::g_last_src));
   else if (radar_bg::g_os_remaining >= 0)
     snprintf(b, sizeof(b), "UP %ud %02u:%02u   API %d", (unsigned) (up / 86400),
              (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),

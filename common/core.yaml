@@ -383,7 +383,7 @@ number:
     min_value: 5
     max_value: 300
     step: 5
-    initial_value: 15           # 免費來源(airplanes.live/adsb.lol)抓取間隔;無每日額度可較密
+    initial_value: 15           # 單源免費 API 間隔;MERGE 另外夾到 >=45s
     unit_of_measurement: s
     mode: box
     optimistic: true
@@ -449,7 +449,7 @@ globals:
   - id: data_src
     type: int
     restore_value: true
-    initial_value: '0'        # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)
+    initial_value: '0'        # 0=OpenSky 1=A.LIVE 2=ADSB.LOL 3=ADSB.FI 4=MERGE
   # ATC 圖層開關(右下面板設定,各自存 NVS)
   - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
@@ -921,8 +921,10 @@ interval:
           }
           // OpenSky 失敗冷卻中(bg task 走免費來源)→ 節奏也切到免費來源的間隔
           bool cooling = (millis() / 1000) < radar_bg::g_os_cooldown_until;
-          int itv = (id(data_src) != 0 || cooling) ? (int) id(poll_interval_alt).state
-                                                   : (int) id(poll_interval).state;
+          int itv = radar_bg::effective_poll_s(id(data_src),
+                                              (int) id(poll_interval).state,
+                                              (int) id(poll_interval_alt).state,
+                                              cooling);
           if (id(poll_tick) >= itv) {
             if (wifi::global_wifi_component->is_connected() &&
                 (id(backlight).current_values.is_on() || id(poll_when_off))) {   // 背光關=暫停抓取(可設定例外)
@@ -1153,15 +1155,19 @@ interval:
           }
           char b[64];
           // 免費來源(手選或 OpenSky fallback)時在狀態列標示資料出處
-          const char *stag = radar_bg::g_last_src == 1 ? " [A.LIVE]"
-                           : radar_bg::g_last_src == 2 ? " [ADSB.LOL]" : "";
+          char stag[20] = "";
+          if (radar_bg::g_last_src > 0)
+            snprintf(stag, sizeof(stag), " [%s]",
+                     radar_bg::src_name(radar_bg::g_last_src));
           auto t = id(rtc_time).now();
           // 狀態列在 800x480 只有 ~26 個等寬字的寬度:原本的 "AC:n   UPD hh:mm:ss  [A.LIVE]"
           // (29 字)會被螢幕右緣切掉,所以拿掉 UPD 與多餘空白(時間本身就看得懂)。
+          // AC 用裁切前的架數;畫面仍只畫 AC_SLOTS。
+          int n_ac = radar_bg::g_fetched_n;
           if (t.is_valid())
-            snprintf(b, sizeof(b), "AC:%d  %02d:%02d:%02d%s", n, t.hour, t.minute, t.second, stag);
+            snprintf(b, sizeof(b), "AC:%d  %02d:%02d:%02d%s", n_ac, t.hour, t.minute, t.second, stag);
           else
-            snprintf(b, sizeof(b), "AC:%d%s", n, stag);
+            snprintf(b, sizeof(b), "AC:%d%s", n_ac, stag);
           lv_label_set_text(id(status_label), b);
           static bool first_data = true;
           if (first_data) {
