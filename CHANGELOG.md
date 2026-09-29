@@ -3,6 +3,33 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.4.0] — 2026-09-30
+
+P4 only for now: both features below landed on `lvgl9`, so the S3 boards stay on v1.3.9.
+
+### Added
+
+- **Two new data sources: ADSB.FI and MERGE** (#16, thanks CaptainJi). ADSB.FI is another
+  key-less readsb feed; the SRC dropdown now reads OPENSKY / A.LIVE / ADSB.LOL / ADSB.FI /
+  MERGE. MERGE queries every available source in one round, de-duplicates by ICAO24 (falling
+  back to callsign plus proximity) and fills empty fields from whichever source has them.
+  It respects the OpenSky failure cooldown and each free source's 429 backoff, and polls no
+  faster than every 45 s because one round is three or four HTTPS requests. The 45 s floor is
+  applied at run time only, so it is never written back into the saved POLL value. Without
+  OpenSky credentials, MERGE simply skips OpenSky.
+- **City / prefecture borders on the map** (#15, thanks CaptainJi). `make_tiles.py` and
+  `make_map.py` gain `--cities` (DataV China prefecture borders, drawn as the kind-3 class);
+  shared edges are stored once and overlaps with coast, country and province lines are
+  stripped.
+
+### Changed
+
+- **The status bar names every source** (`[ADSB.FI]`, `[MERGE]`, …), and `AC:` counts the
+  aircraft fetched rather than the 40 that fit on screen. The merged list is trimmed to the
+  40 nearest before it is published, so a busy airspace no longer costs PSRAM.
+- **Map outlines are clipped to the radar circle** instead of drawing a whole segment when
+  one endpoint is inside.
+
 ## [v1.3.9] — 2026-09-07
 
 ### Added
