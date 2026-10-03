@@ -1,0 +1,13 @@
+{
+  "name": "ESP32 Flight Radar (s3-touch-lcd-7)",
+  "version": "v1.3.9-beta",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware/flight-radar-s3-touch-lcd-7-v1.3.9-beta.factory.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

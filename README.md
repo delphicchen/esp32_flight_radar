@@ -32,6 +32,11 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 
 All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash**.
 
+> **Testers wanted — Touch-LCD-7 (beta).** Built and config-verified but not yet flashed on
+> real hardware. Pick it on the installer page and report back on
+> [#17](https://github.com/delphicchen/esp32_flight_radar/issues/17).
+> 徵求測試:7 吋板已編譯驗證、尚未實機燒錄,歡迎回報 / 征求测试,欢迎回报。
+
 > **The map is downloaded now, and that needs one USB flash.** The firmware used to
 > compile the map in, so a prebuilt image only had a useful map near Taiwan; it now
 > fetches tiles for your own coordinates, which required a custom partition table — and
