@@ -1,0 +1,49 @@
+# =============================================================
+# Flight Radar — Waveshare ESP32-S3-Touch-LCD-7 (800x480)
+#   ESP32-S3 + 800x480 parallel-RGB 面板 + GT911 觸控(CH422G)。(#17)
+#
+# 與 Touch-LCD-5(800x480)同一套主板設計:RGB 資料腳、CH422G 的
+# reset(EXIO3)/enable+背光(EXIO2)/觸控 reset(EXIO1)/SD CS(EXIO4)、GT911
+# 全部相同,所以直接沿用 boards/waveshare_esp32s3_rgb_800x480.yaml 與
+# ui/ui_800x480.yaml,只在下方用 !extend 覆寫 display:
+#   - model 換成 ESPHome 內建的 ESP32-S3-TOUCH-LCD-7-800X480
+#   - vsync porch 16/16(5 吋是 8/8;水平 4/8/8 兩者相同)
+#   - enable 多拉一支 EXIO6(ESPHome 7 吋 model 的設定)
+#   16 MHz / (820 x 512) ≈ 38.1 Hz
+#
+# 狀態:config + 編譯驗證,尚未實機燒錄(beta)。
+# =============================================================
+
+substitutions:
+  disp_w: "800"          # panel width  (px)
+  disp_h: "480"          # panel height (px)
+  radar_canvas: "456"    # square radar canvas side (px) — matches ui/ui_800x480.yaml
+  # font sizes (scaled per resolution)
+  f_small: "22"
+  f_mid: "28"
+  f_clock: "64"
+  f_mono: "18"
+  f_tiny: "14"
+  # 螢幕方向:兩個值必須成對修改(見 radar-s3-5.yaml)
+  #   正立: disp_rotation "0°"   + touch_mirror "false"
+  #   倒轉: disp_rotation "180°" + touch_mirror "true"
+  disp_rotation: "0°"
+  touch_mirror: "false"
+
+packages:
+  core:  !include common/core.yaml
+  board: !include boards/waveshare_esp32s3_rgb_800x480.yaml
+  ui:    !include ui/ui_800x480.yaml
+
+# 用 !extend 合併進板檔的 display(其餘設定沿用 5 吋)
+display:
+  - id: !extend main_display
+    model: ESP32-S3-TOUCH-LCD-7-800X480
+    vsync_back_porch: 16
+    vsync_front_porch: 16
+    enable_pin:
+      - ch422g: io_ex
+        number: 2               # EXIO2 = panel enable / backlight(與 backlight 共用)
+        allow_other_uses: true
+      - ch422g: io_ex
+        number: 6

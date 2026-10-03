@@ -53,6 +53,7 @@ case "$BRANCH" in
       "radar-jc8048w550.yaml:s3-jc8048w550:ESP32-S3"
       "radar-s3-5.yaml:s3-touch-lcd-5:ESP32-S3"
       "radar-s3-5b.yaml:s3-touch-lcd-5b:ESP32-S3"
+      "radar-s3-7.yaml:s3-touch-lcd-7:ESP32-S3"
     ) ;;
   lvgl9)
     WANT_ENV="esphome-lvgl9"

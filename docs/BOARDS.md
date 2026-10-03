@@ -20,6 +20,7 @@ radar.yaml            entry: ESP32-S3 + 800×480 RGB   (the original board)
 radar-jc8048w550.yaml entry: Guition JC8048W550C = Sunton ESP32-8048S050 (800×480 RGB)
 radar-s3-5.yaml       entry: Waveshare ESP32-S3-Touch-LCD-5   (800×480 RGB)
 radar-s3-5b.yaml      entry: Waveshare ESP32-S3-Touch-LCD-5B  (1024×600 RGB)
+radar-s3-7.yaml       entry: Waveshare ESP32-S3-Touch-LCD-7   (800×480 RGB)
 radar-p4-7b.yaml      entry: Waveshare ESP32-P4-WIFI6-Touch-LCD-7B (1024×600 MIPI-DSI)
 common/core.yaml      shared logic + UI-independent components (fonts, scripts, …)
 partitions.csv        custom partition table: shrinks app0/app1 to make room for `maps`
@@ -42,6 +43,7 @@ dimensions left to chase.
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C** (= Sunton ESP32-8048S050) | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | config + build verified, **not yet flashed** |
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | config + build verified, **not yet flashed** |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 parallel-RGB | native | **verified on hardware** |
+| `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 | ESP32-S3 | 800×480 parallel-RGB | native | config + build verified, **not yet flashed** (beta) — reuses the Touch-LCD-5 board file, only the panel model/vsync porches differ |
 | `radar-p4-7b.yaml` | Waveshare ESP32-P4-WIFI6-Touch-LCD-7B | ESP32-P4 | 1024×600 MIPI-DSI (EK79007) | ESP32-C6 (esp-hosted/SDIO) | **verified on hardware** (panel, colours, touch, v1.3.0 maps) |
 
 Common requirements for the RGB boards: **≥8 MB octal PSRAM** (quad-PSRAM can't feed
@@ -195,6 +197,7 @@ radar.yaml            入口:ESP32-S3 + 800×480 RGB(原始板)
 radar-jc8048w550.yaml 入口:Guition JC8048W550C = Sunton ESP32-8048S050(800×480 RGB)
 radar-s3-5.yaml       入口:微雪 ESP32-S3-Touch-LCD-5(800×480 RGB)
 radar-s3-5b.yaml      入口:微雪 ESP32-S3-Touch-LCD-5B(1024×600 RGB)
+radar-s3-7.yaml       入口:微雪 ESP32-S3-Touch-LCD-7(800×480 RGB)
 radar-p4-7b.yaml      入口:微雪 ESP32-P4-WIFI6-Touch-LCD-7B(1024×600 MIPI-DSI)
 common/core.yaml      共用邏輯 + 與版面無關的元件(字型、腳本…)
 partitions.csv        自訂分割表:縮小 app0/app1 空出 `maps` 分割區
@@ -214,6 +217,7 @@ display 驅動與 C++ 巨集(透過 `build_flags` → `radar_fetch.h`),不再有
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C**(= Sunton ESP32-8048S050) | ESP32-S3 | 800×480 parallel-RGB(ST7262) | 原生 | config + 編譯驗證,**尚未實機燒錄** |
 | `radar-s3-5.yaml` | 微雪 ESP32-S3-Touch-LCD-5 | ESP32-S3 | 800×480 parallel-RGB(ST7262) | 原生 | config + 編譯驗證,**尚未實機燒錄** |
 | `radar-s3-5b.yaml` | 微雪 ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 parallel-RGB | 原生 | **實機驗證過** |
+| `radar-s3-7.yaml` | 微雪 ESP32-S3-Touch-LCD-7 | ESP32-S3 | 800×480 parallel-RGB | 原生 | config + 編譯驗證,**尚未實機燒錄**(beta)—— 沿用 Touch-LCD-5 板檔,只換面板 model 與 vsync porch |
 | `radar-p4-7b.yaml` | 微雪 ESP32-P4-WIFI6-Touch-LCD-7B | ESP32-P4 | 1024×600 MIPI-DSI(EK79007) | ESP32-C6(esp-hosted/SDIO) | **實機驗證過**(面板、顏色、觸控、v1.3.0 地圖) |
 
 RGB 板共同需求:**≥8 MB octal PSRAM**(quad 餵不動 RGB 屏)、**GT911** I²C 觸控、16 MB flash

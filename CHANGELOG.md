@@ -3,6 +3,16 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Added
+
+- **Waveshare ESP32-S3-Touch-LCD-7 (800×480)** — new entry `radar-s3-7.yaml` (#17).
+  It shares the Touch-LCD-5's board design (same RGB pins, CH422G, GT911, microSD), so
+  it reuses that board file and only swaps the panel to ESPHome's
+  `ESP32-S3-TOUCH-LCD-7-800X480` model (vsync porches 16/16, extra enable on EXIO6).
+  Config and build verified, not yet flashed — beta.
+
 ## [v1.3.9] — 2026-09-07
 
 ### Added
