@@ -28,14 +28,15 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | 800×480 RGB | `main` |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | 1024×600 RGB | `main` |
 | `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 *(beta)* | 800×480 RGB | `main` |
+| `radar-s3-7b.yaml` | Waveshare ESP32-S3-Touch-LCD-7B *(beta)* | 1024×600 RGB | `main` |
 | `radar-p4-7b.yaml` | Waveshare ESP32-P4-WIFI6-Touch-LCD-7B | 1024×600 MIPI-DSI | `lvgl9` |
 
 All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash**.
 
-> **Testers wanted — Touch-LCD-7 (beta).** Built and config-verified but not yet flashed on
+> **Testers wanted — Touch-LCD-7 / 7B (beta).** Built and config-verified but not yet flashed on
 > real hardware. Pick it on the installer page and report back on
 > [#17](https://github.com/delphicchen/esp32_flight_radar/issues/17).
-> 徵求測試:7 吋板已編譯驗證、尚未實機燒錄,歡迎回報 / 征求测试,欢迎回报。
+> 徵求測試:7 吋 / 7B 板已編譯驗證、尚未實機燒錄,歡迎回報 / 征求测试,欢迎回报。
 
 > **The map is downloaded now, and that needs one USB flash.** The firmware used to
 > compile the map in, so a prebuilt image only had a useful map near Taiwan; it now

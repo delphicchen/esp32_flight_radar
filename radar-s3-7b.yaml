@@ -1,0 +1,31 @@
+# =============================================================
+# Flight Radar — Waveshare ESP32-S3-Touch-LCD-7B (1024x600)
+#   ESP32-S3 + 7" 1024x600 parallel-RGB panel + GT911 touch。(#17)
+#
+# 與 5B 同解析度、同一份 ui/ui_1024x600.yaml;board 套件換成 7B 專屬
+# (IO 擴充晶片與面板時序不同,見 boards/waveshare_esp32s3_rgb_1024x600_7b.yaml)。
+#
+# 狀態:config + 編譯驗證,尚未實機燒錄(beta)。
+# =============================================================
+
+substitutions:
+  disp_w: "1024"         # panel width  (px)
+  disp_h: "600"          # panel height (px)
+  radar_canvas: "570"    # radar canvas side (456 * 1.25) — matches ui/ui_1024x600.yaml
+  # font sizes scaled x1.25 from the 800x480 layout
+  f_small: "28"
+  f_mid: "35"
+  f_clock: "80"
+  f_mono: "23"
+  f_tiny: "18"
+  # 螢幕方向:電源線從另一邊出來時把畫面轉 180°。兩個值必須成對修改 ——
+  # LVGL 接手旋轉後會把 display rotation 歸零,觸控不會自己跟著轉。
+  #   正立: disp_rotation "0°"   + touch_mirror "false"
+  #   倒轉: disp_rotation "180°" + touch_mirror "true"
+  disp_rotation: "0°"
+  touch_mirror: "false"
+
+packages:
+  core:  !include common/core.yaml
+  board: !include boards/waveshare_esp32s3_rgb_1024x600_7b.yaml
+  ui:    !include ui/ui_1024x600.yaml

@@ -1,0 +1,277 @@
+# =====================================================================
+#  Board: Waveshare ESP32-S3-Touch-LCD-7B (#17)
+#         ESP32-S3 (16 MB flash, 8 MB octal PSRAM)
+#         7" 1024x600 parallel-RGB IPS panel + GT911 touch
+#
+#  以 5B 的板檔(waveshare_esp32s3_rgb_1024x600.yaml)為底,記憶體/sdkconfig/
+#  LVGL 緩衝的調校全部照搬。與 5B 的差異只有兩處(對照
+#  waveshareteam/ESP32-S3-Touch-LCD-7B 的 examples/Arduino/examples/06_LCD):
+#   1) IO 擴充晶片不是 CH422G,而是微雪自家 MCU(I2C 0x24,暫存器式協定)
+#      → 用本地元件 components/ws_ioext。EXIO 編號與 5B 相同:
+#        EXIO1 觸控 reset / EXIO2 背光 enable / EXIO3 LCD reset / EXIO4 SD CS /
+#        EXIO5 USB(0)↔CAN(1) 切換 / EXIO6 LCD_VDD_EN
+#      附帶好處:背光有真正的 PWM(暫存器 0x05),亮度滑桿是真的調光。
+#   2) 面板時序不同(見下方 display:)。RGB 資料腳、DE/HSYNC/VSYNC/PCLK、
+#      I2C 8/9、GT911 INT 4、SD 11/12/13 都與 5B 相同。
+#
+#  狀態:config + 編譯驗證,尚未實機燒錄(beta)。
+#
+#  Resolution / radar geometry come from the substitutions in the entry
+#  file (radar-s3-7b.yaml).
+# =====================================================================
+
+# ---- Resolution-driven build flags for the C++ includes ----
+esphome:
+  platformio_options:
+    build_flags:
+      - "-DSCREEN_W=${disp_w}"
+      - "-DSCREEN_H=${disp_h}"
+      - "-DRADAR_CANVAS=${radar_canvas}"
+      # This board uses the `mipi_rgb` display driver (see below). Both it and
+      # rpi_dpi_rgb are parallel-RGB panels, so the framebuffer screenshot works
+      # on either -- value 2 just tells radar_fetch.h which wrapper class holds
+      # the esp_lcd panel handle.
+      - "-DRADAR_DISPLAY_RGB=2"   # 2 = parallel-RGB via mipi_rgb(截圖可用)
+      # 背光有真 PWM(ws_ioext 暫存器 0x05)→ 亮度滑桿直接調背光
+      - "-DRADAR_BL_PWM=1"
+      # microSD(TF)插槽:三指截圖除了 HTTP 之外另存一份到卡上。
+      # MOSI/CLK/MISO 是原生 GPIO(11/12/13,與 RGB 資料腳不衝突);CS 在 IO 擴充
+      # EXIO4,由下方的 sd_cs switch 開機拉低並保持,見 radar_fetch.h 的 RADAR_SD_SPI。
+      - "-DRADAR_SD_SPI=1"
+      - "-DRADAR_SD_HOST=SPI2_HOST"
+      - "-DRADAR_SD_MOSI=11"
+      - "-DRADAR_SD_CLK=12"
+      - "-DRADAR_SD_MISO=13"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true   # 120MHz octal PSRAM
+      # microSD 要用 FATFS,而 ESPHome 對 IDF 建置做了兩層瘦身,兩層都要解:
+      #  1) fatfs 元件預設不編進去(DEFAULT_EXCLUDED_IDF_COMPONENTS)→ 缺 esp_vfs_fat.h
+      #  2) disable_fatfs 預設 true 會把 CONFIG_FATFS_VOLUME_COUNT 設成 0 → 掛不起來
+      disable_fatfs: false
+      include_builtin_idf_components: [fatfs]
+    sdkconfig_options:
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      # 17 = ESPHome 依實際元件算出的需求(11 TCP + 3 UDP + 3 TCP_LISTEN)。
+      # 設 16 會被警告 socket 不足,執行期可能 socket 耗盡。
+      CONFIG_LWIP_MAX_SOCKETS: "17"
+      # --- 1024x600 記憶體吃緊:把 WiFi/LWIP 緩衝與 TLS 握手記憶體挪出內部 RAM ---
+      # 症狀:esp-sha/esp-aes "Failed to allocate memory" → TLS 連線失敗、抓不到資料
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"   # WiFi/LWIP 緩衝改配 PSRAM,釋放內部 RAM
+      CONFIG_MBEDTLS_DYNAMIC_BUFFER: "y"          # TLS 緩衝握手時才配、用完即釋放(降峰值)
+      CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN: "y"  # 收/發用不同大小,配合 dynamic buffer
+      CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN: "8192"  # 預設 16384;減半再省一半 TLS 緩衝
+      # 不要開 CONFIG_LCD_RGB_RESTART_IN_VSYNC:實測於本板無效——位移沒有消失,
+      # 反而因為每個 VBlank 重置 GDMA 通道而造成畫面嚴重抖動。
+      # 不要開 CONFIG_LCD_RGB_ISR_IRAM_SAFE:理論上它能修水平錯置(flash cache
+      # 停用期間 bounce buffer ISR 被擋 → permanent desync),但實測開機直接
+      # crash loop 進 safe mode:
+      #   Guru Meditation Error: Core 1 panic'ed (Cache error).
+      #   Cache disabled but cached memory region accessed
+      # 因為 ESPHome mipi_rgb 驅動的 ISR 呼叫鏈不是 IRAM-safe(callback/資料
+      # 不在 IRAM/DRAM),cache 一關 ISR 反而炸掉。要用它得先改驅動本身。
+      # --- 水平錯置/抖動:XIP from PSRAM(ISR_IRAM_SAFE 的正規替代)---
+      # 把程式碼+rodata 搬進 PSRAM 執行,flash 寫入(NVS/WiFi 校準)期間
+      # cache 不再停用 → bounce buffer 補充 ISR 不被擋 → 消除 permanent
+      # desync 的觸發源。不需改驅動。代價:韌體佔 ~2MB PSRAM、cache miss
+      # 改走 PSRAM 匯流排(LVGL 渲染已移入內部 SRAM,騰出了餘裕)。
+      CONFIG_SPIRAM_XIP_FROM_PSRAM: "y"
+
+# ---- 本地覆寫的元件(components/,各檔內有「本地覆寫」註解標明唯一改動點)----
+# psram    :停用溫感 timing 選項,保住 120MHz octal(詳下)
+# lvgl     :繪圖緩衝改配內部 SRAM(1/16 螢幕,77KB)——渲染不再與面板掃描
+#            搶 PSRAM 匯流排,lvgl 慢操作 7 次/150s → 約 0
+# (曾試 mipi_rgb 覆寫加深 bounce buffer 10→20 行:對錯置/抖動皆無效——
+#  使用者實測「開機瞬間就偏、每次偏移量相同」,證明錯置是靜態時序問題而非
+#  underrun 累積,已撤回。)
+#
+# psram 覆寫的緣由:上游 ESPHome 在 octal + 120MHz + IDF >= 5.4 時會無條件開啟
+# CONFIG_SPIRAM_TIMING_TUNING_POINT_VIA_TEMPERATURE_SENSOR,而 IDF 的
+# psram_adjust_timing_point_via_tsens() 只支援 flash 廠商 ID 0xC8/0x20;本板
+# 不在名單 → 開機 init function failed (0x106) → 無限重開機。該選項無法用
+# sdkconfig_options 壓回 n(psram 元件的 to_code 在使用者選項之後執行,必定
+# 覆寫),所以改用 external_components 覆寫整個 psram 元件,只拿掉那一行。
+# components/psram/__init__.py 是 ESPHome 2026.3.3 的複本 + 該處註解掉;
+# 升級 ESPHome 後若上游已修好,刪掉 components/psram 與這段 external_components
+# 即可回到內建元件。
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [psram, lvgl, ws_ioext]
+
+# 120MHz octal 才餵得動 1024x600@60Hz(~73 MB/s);下方 display 的 pclk 需與此
+# 成對設定(52MHz ≈ 59.6 Hz)。若哪天必須退回 80MHz,pclk 要同時降到 30MHz。
+psram:
+  mode: octal
+  speed: 120MHz
+
+# ---- IO expander (LCD reset/enable, backlight, touch reset) ----
+i2c:
+  sda: GPIO8                    # GT911 + IO 擴充 SDA
+  scl: GPIO9                    # GT911 + IO 擴充 SCL
+  frequency: 400kHz
+
+ws_ioext:
+  - id: io_ex                   # 微雪 IO 擴充 @0x24;開機寫入 0xDF(IO5=0 → GPIO19/20 走 USB)
+
+# ---- microSD 的 CS(EXIO4)----
+# 那條 SPI 上只有 SD 一個裝置,所以 CS 開機拉低就不必再動:restore_mode: ALWAYS_OFF
+# 會在 setup 時寫入 OFF(低電位),sdspi 那邊便以 SDSPI_SLOT_NO_CS 掛載。
+# 這樣可以完全避開「每次 SPI 交易都要透過 I2C 切 CS」的開銷與 GT911 觸控的匯流排競爭。
+switch:
+  - platform: gpio
+    id: sd_cs
+    internal: true
+    restore_mode: ALWAYS_OFF
+    pin:
+      ws_ioext: io_ex
+      number: 4
+
+# ---- Backlight ----
+# EXIO2 是背光 enable(由下方 display 的 enable_pin 拉高並保持),亮度由
+# 擴充晶片的 PWM 暫存器控制 → 與通用板一樣用 monochromatic light,
+# PWR 鍵關燈 = PWM 寫 0。
+# >>> 未實機驗證 PWM 極性:若滑桿方向相反(往右變暗),在 output 加
+#     inverted: true。 <<<
+output:
+  - platform: ws_ioext
+    id: bl_pwm
+    ws_ioext: io_ex
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: bl_pwm
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- Touch (GT911, I2C, reset via EXIO1) ----
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    update_interval: 20ms
+    interrupt_pin: GPIO4        # GT911 INT
+    reset_pin:
+      ws_ioext: io_ex
+      number: 1                 # EXIO1 = touch reset (verify)
+    transform:
+      # 與 display 的 ${disp_rotation} 成對 —— LVGL 接手旋轉後會把 display
+      # rotation 歸零(lvgl_esphome.cpp),觸控不會自己跟著轉,得自己鏡像。
+      mirror_x: ${touch_mirror}
+      mirror_y: ${touch_mirror}
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
+
+# ---- Display (parallel RGB, driven by LVGL) ----
+# 借用 ESPHome 內建 model WAVESHARE-5-1024X600 取得 RGB 腳位(與 7B 逐腳相同,
+# pclk_inverted 也與官方 pclk_active_neg=1 一致),再把 7B 不同的部分覆寫掉:
+#   - porch:官方 7B 範例 rgb_lcd_port.cpp
+#       HPW 162 / HBP 152 / HFP 48,VPW 45 / VBP 13 / VFP 3
+#   - pclk:官方值即 30 MHz(5B 官方是 16 MHz、我們拉到 30)
+#       H_total = 1024+162+152+48 = 1386 ; V_total = 600+45+13+3 = 661
+#       30 MHz / (1386 x 661) ≈ 32.7 Hz
+#   - reset/enable 腳改走 ws_ioext;enable 多拉一支 EXIO6(LCD_VDD_EN),
+#     同 ESPHome 7 吋 800x480 model 的做法。
+# 若畫面水平錯位/撕裂,先往下調 pclk(勿往上),見 5B 板檔的實測紀錄。
+display:
+  - platform: mipi_rgb
+    id: main_display
+    # 螢幕方向(見入口檔的 ${disp_rotation})。mipi_rgb 的 rotation_as_transform()
+    # 會把 180° 換成面板 MADCTL 的 mirror_x+mirror_y,再把軟體旋轉歸零 —— LVGL
+    # 完全不知情,不必多配旋轉緩衝,等於免費。
+    rotation: ${disp_rotation}
+    model: WAVESHARE-5-1024X600
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions: ${disp_w}x${disp_h}
+    pclk_frequency: 30MHz
+    hsync_pulse_width: 162
+    hsync_back_porch: 152
+    hsync_front_porch: 48
+    vsync_pulse_width: 45
+    vsync_back_porch: 13
+    vsync_front_porch: 3
+    reset_pin:
+      ws_ioext: io_ex
+      number: 3                 # EXIO3 = LCD reset
+    enable_pin:
+      - ws_ioext: io_ex
+        number: 2               # EXIO2 = 背光 enable
+      - ws_ioext: io_ex
+        number: 6               # EXIO6 = LCD_VDD_EN
+
+# ---- LVGL 繪圖緩衝(板子專屬,合併進 ui 套件的 lvgl: 區塊)----
+# 這裡設而不寫進 ui/ui_1024x600.yaml,是因為那個檔案由 tools/scale_layout.py
+# 自動生成,手改會被下次生成蓋掉。
+#
+# 不設時預設為 0,而 lvgl_esphome.cpp:496-506 的邏輯是:
+#   frac=0 → 當成 1(全螢幕)→ 1024*600*2 = 1.2MB 緩衝
+#   且 `buffer_frac_ >= MIN_BUFFER_FRAC/2`(即 >= 4)不成立 → 跳過 malloc(),
+#   直接走 lv_custom_mem_alloc() 配到 PSRAM。
+# 結果每次渲染要 PSRAM 寫一次(draw buffer)+ 搬一次(→ framebuffer)= 2.4MB
+# PSRAM 流量,還要跟面板 DMA 搶匯流排。
+#
+# 歷史教訓:單設 buffer_size(不搭配 components/lvgl 覆寫)是無效的——
+# CONFIG_SPIRAM_USE_MALLOC=y 會讓 malloc() 把 153KB 導去 PSRAM,緩衝只是變小
+# 沒換位置,實測延遲反而略差(467/581/1050 vs 403/510/564 ms)。
+#
+# 現行做法(Seeed round-display workshop 配方):components/lvgl 覆寫把
+# 繪圖緩衝改用 heap_caps_malloc(MALLOC_CAP_INTERNAL) 配進內部 SRAM,
+# buffer_size: 12% → frac=8,覆寫內再減半 → 77KB(1/16 螢幕)局部緩衝。
+# 渲染全程在 SRAM、分 16 段,只有 flush 寫 PSRAM framebuffer,不再與面板
+# 掃描 DMA 搶匯流排。實測 lvgl 慢操作警告 7 次/150s → 約 0。
+# 大小取捨(皆實測):154KB(1/8)渲染最快但餓死 TLS;77KB(1/16)兩者兼得
+# ← 採用;38KB(1/32)TLS 健康但 32 段 flush 開銷讓慢操作暴增到 464~861ms,
+# 縮過頭。
+# 開機 log 會印 "draw buffer ... in internal SRAM (1/16 screen)";若印
+# "falling back" 表示內部 RAM 不足,退回 PSRAM(行為同舊版,不會開不了機)。
+lvgl:
+  buffer_size: 12%
+
+# ---- 鬧鐘本地發聲:這片板子沒有音訊硬體 ----
+# common/core.yaml 的 fire_alarm/hush_alarm 會無條件呼叫這兩個 script,所以每片
+# board 都要有;沒喇叭的板子留空實作,鬧鐘目標清單也不會出現 LOCAL SPEAKER
+# (由 -DRADAR_LOCAL_SPK 控制,見 alarm.h)。
+script:
+  - id: local_ring_start
+    then:
+      - lambda: '// 無板載喇叭'
+  - id: local_ring_stop
+    then:
+      - lambda: '// 無板載喇叭'
