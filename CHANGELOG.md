@@ -39,6 +39,13 @@ P4 only for now: both features below landed on `lvgl9`, so the S3 boards stay on
 - **Map outlines are clipped to the radar circle** instead of drawing a whole segment when
   one endpoint is inside.
 
+### Changed
+
+- **Timezone is now also in the web UI** (*Timezone*, a mirror of the on-screen TIMEZONE
+  dropdown on the alarm page; either one updates the other). A user setting the device up
+  over Wi-Fi could not find it and was left on the default Taipei time (#17). README and
+  the usage guide now say to tap the clock for alarms and timezone.
+
 ## [v1.3.9] — 2026-09-07
 
 ### Added

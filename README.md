@@ -81,6 +81,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 - **Map outline** — coastlines, borders, airports, runways, navaids and airspace.
 - **Alarm clock** — 4 alarms with per-weekday scheduling, ringing through a Home Assistant
   speaker or the board's own (P4).
+- **Tap the clock to set alarms and the timezone.** The clock defaults to Taipei time; pick
+  yours under **TIMEZONE** on that page (also in the web UI as *Timezone*).
 - **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
   *Radar Sweep*) to stop the rotating sweep; aircraft stay on screen at steady brightness.
 - **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
@@ -146,6 +148,8 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   解碼合成,UI 完全不卡。
 - **地圖輪廓** —— 海岸線、行政邊界、機場、跑道、導航點與空域。
 - **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
+- **點時鐘可設定鬧鐘與時區** —— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
+  (網頁介面的 *Timezone* 也能改)。
 - **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
   即可停掉旋轉掃描線;航班照常顯示,亮度固定。
 - **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
@@ -208,6 +212,8 @@ ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
   解码合成,UI 完全不卡。
 - **地图轮廓** —— 海岸线、行政边界、机场、跑道、导航点与空域。
 - **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
+- **点时钟可设定闹钟与时区** —— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
+  (网页界面的 *Timezone* 也能改)。
 - **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
   即可停掉旋转扫描线;航班照常显示,亮度固定。
 - **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
