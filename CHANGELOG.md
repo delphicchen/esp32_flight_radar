@@ -19,6 +19,13 @@ out first, because that is the part that costs you time.
   slider really dims the backlight on this board. Panel timings from Waveshare's 7B
   example (HPW/HBP/HFP 162/152/48, VPW/VBP/VFP 45/13/3, 30 MHz). Not yet flashed — beta.
 
+### Changed
+
+- **Timezone is now also in the web UI** (*Timezone*, a mirror of the on-screen TIMEZONE
+  dropdown on the alarm page; either one updates the other). A user setting the device up
+  over Wi-Fi could not find it and was left on the default Taipei time (#17). README and
+  the usage guide now say to tap the clock for alarms and timezone.
+
 ## [v1.3.9] — 2026-09-07
 
 ### Added

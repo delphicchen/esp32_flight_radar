@@ -87,6 +87,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 - **Map outline** — coastlines, borders, airports, runways, navaids and airspace.
 - **Alarm clock** — 4 alarms with per-weekday scheduling, ringing through a Home Assistant
   speaker or the board's own (P4).
+- **Tap the clock to set alarms and the timezone.** The clock defaults to Taipei time; pick
+  yours under **TIMEZONE** on that page (also in the web UI as *Timezone*).
 - **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
 - **Screenshots** — three-finger swipe saves a BMP, downloadable over HTTP and, on the P4,
   written to microSD.
@@ -152,6 +154,8 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   解碼合成,UI 完全不卡。
 - **地圖輪廓** —— 海岸線、行政邊界、機場、跑道、導航點與空域。
 - **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
+- **點時鐘可設定鬧鐘與時區** —— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
+  (網頁介面的 *Timezone* 也能改)。
 - **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
 - **截圖** —— 三指滑動存成 BMP,可經 HTTP 下載;P4 還會另存一份到 microSD。
 - **全部在觸控螢幕上設定** —— Wi-Fi 走 captive portal,其餘都在面板上完成。設定存進 NVS、
@@ -214,6 +218,8 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
   解码合成,UI 完全不卡。
 - **地图轮廓** —— 海岸线、行政边界、机场、跑道、导航点与空域。
 - **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
+- **点时钟可设定闹钟与时区** —— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
+  (网页界面的 *Timezone* 也能改)。
 - **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
 - **截图** —— 三指滑动存成 BMP,可经 HTTP 下载;P4 还会另存一份到 microSD。
 - **全部在触摸屏上设定** —— Wi-Fi 走 captive portal,其余都在面板上完成。设定存进 NVS、

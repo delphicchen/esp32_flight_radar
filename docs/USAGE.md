@@ -115,10 +115,14 @@ You can also just open the URL in a browser. If the colors come out wrong (red/b
 
 ## Using it outside Taiwan
 
-**You do not need to do anything.** The firmware downloads the map tiles covering your own
+**You do not need to do anything for the map.** The firmware downloads the map tiles covering your own
 coordinates on first boot, from [flight-radar-maps](https://github.com/delphicchen/flight-radar-maps),
 and stores them in flash. A prebuilt image works anywhere; the screen shows
 `DOWNLOADING MAP` under the callsign while it fetches.
+
+**Set your timezone, though** — the clock defaults to Taipei. Tap the clock and pick it under
+**TIMEZONE** at the bottom of the alarm page, or use *Timezone* in the web UI. Not listed?
+Choose a city in the same zone (e.g. Rome, Madrid, Amsterdam → PARIS or BERLIN).
 
 **A near-empty map is usually correct.** The tiles carry coastline, country, state and
 county/district lines and nothing else, so somewhere inland with no coast or state border
@@ -285,9 +289,12 @@ automation:
 
 ## 在台灣以外地區使用
 
-**你什麼都不用做。** 韌體第一次開機就會依你的座標,從
+**地圖你什麼都不用做。** 韌體第一次開機就會依你的座標,從
 [flight-radar-maps](https://github.com/delphicchen/flight-radar-maps) 下載對應的圖磚存進 flash,
 預編韌體在任何地方都能用;抓取期間呼號下方會顯示 `DOWNLOADING MAP`。
+
+**但時區要自己設** —— 時鐘預設台北時間。點時鐘,在鬧鐘頁最下方的 **TIMEZONE** 選擇,
+或在網頁介面的 *Timezone* 改。清單沒有你的城市就選同時區的(例:羅馬、馬德里 → PARIS 或 BERLIN)。
 
 **地圖看起來幾乎空白,通常是正常的。** 圖磚只有海岸線、國界、州/省界與縣市/郡界四種線,
 內陸地區附近沒有海岸也沒有州界時,本來就沒什麼可畫 —— 半徑設得小的時候,畫面上可能就只有

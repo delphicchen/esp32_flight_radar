@@ -44,6 +44,7 @@ esphome:
           // 還原時區:NVS 的 index → POSIX TZ 執行期套用,並把下拉同步到該項
           id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
+          id(tz_select).publish_state((size_t) id(tz_sel));   // 網頁的 Timezone 也同步
           // 鎖定所有頁面的捲動:避免三指截圖手勢把頁面拖出位移,截到偏移後的內容
           lv_obj_t *pgs[4] = { id(main_page)->obj, id(alarm_page)->obj,
                                id(config_page)->obj, id(settings_page)->obj };
@@ -365,6 +366,38 @@ number:
     entity_category: config
 
 # ---- 航班資料抓取(OpenSky OAuth2)----
+# ---- 時區(網頁版):與鬧鐘頁的 TIMEZONE 下拉是同一個設定 ----
+# 真正存 NVS 的是 tz_sel(globals),這裡只是它在網頁/HA 的鏡像,所以不設
+# restore_value。選項文字與 ui/ 的 tz_dd options 逐字相同、index 對齊
+# radar_bg::tz_posix()。螢幕那邊改了會在 tz_dd 的 on_value 回推 publish_state。
+# (#17:使用者從網頁找不到時區設定,時鐘一直停在預設的台北時間)
+select:
+  - platform: template
+    name: Timezone
+    id: tz_select
+    entity_category: config
+    options:
+      - "TAIPEI (UTC+8)"
+      - "TOKYO (UTC+9)"
+      - "SHANGHAI (UTC+8)"
+      - "HONG KONG (UTC+8)"
+      - "SEOUL (UTC+9)"
+      - "BANGKOK (UTC+7)"
+      - "LONDON (UTC+0)"
+      - "PARIS (UTC+1)"
+      - "BERLIN (UTC+1)"
+      - "NEW YORK (UTC-5)"
+      - "LOS ANGELES (UTC-8)"
+      - "UTC"
+    set_action:
+      - lambda: |-
+          auto i = id(tz_select).index_of(x);
+          if (!i.has_value()) return;
+          id(tz_sel) = (int) *i;
+          id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
+          lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
+          id(tz_select).publish_state(*i);
+
 http_request:
   timeout: 20s
   verify_ssl: false

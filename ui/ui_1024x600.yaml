@@ -7060,6 +7060,7 @@ lvgl:
                   if (i == id(tz_sel)) return;          // set_selected_index 會回打,值沒變就跳過
                   id(tz_sel) = i;
                   id(rtc_time).set_timezone(radar_bg::tz_posix(i));
+                  id(tz_select).publish_state((size_t) i);   // 網頁的 Timezone 同步
         - obj:
             id: tp_overlay
             x: 263
