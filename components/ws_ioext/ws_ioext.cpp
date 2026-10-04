@@ -53,8 +53,10 @@ size_t WsIoExtGPIOPin::dump_summary(char *buffer, size_t len) const {
 
 #ifdef USE_OUTPUT
 void WsIoExtPwmOutput::write_state(float state) {
-  // 官方 IO_EXTENSION_Pwm_Output() 把上限夾在 97%(≈247),照做
-  this->parent_->write_pwm((uint8_t) (state * 247.0f + 0.5f));
+  // 極性是反的:PWM 值越大越暗(實機回報,#17)。官方 IO_EXTENSION_Pwm_Output()
+  // 把上限夾在 97%(≈247)免得全黑,滑桿照做;只有 state 0(PWR 鍵關燈)寫 255 全黑。
+  uint8_t v = state <= 0.0f ? 255 : (uint8_t) ((1.0f - state) * 247.0f + 0.5f);
+  this->parent_->write_pwm(v);
 }
 #endif
 

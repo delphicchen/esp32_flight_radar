@@ -137,9 +137,8 @@ switch:
 # ---- Backlight ----
 # EXIO2 是背光 enable(由下方 display 的 enable_pin 拉高並保持),亮度由
 # 擴充晶片的 PWM 暫存器控制 → 與通用板一樣用 monochromatic light,
-# PWR 鍵關燈 = PWM 寫 0。
-# >>> 未實機驗證 PWM 極性:若滑桿方向相反(往右變暗),在 output 加
-#     inverted: true。 <<<
+# PWR 鍵關燈 = PWM 寫 255。擴充晶片的 PWM 是反向的(值越大越暗),
+# 已在 ws_ioext.cpp 的 write_state() 處理,這裡不要再加 inverted: true。
 output:
   - platform: ws_ioext
     id: bl_pwm

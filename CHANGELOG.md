@@ -17,7 +17,14 @@ out first, because that is the part that costs you time.
   Waveshare's own MCU at I2C 0x24 instead of a CH422G, so it gets a small local
   component (`components/ws_ioext`) that also drives the backlight PWM — the brightness
   slider really dims the backlight on this board. Panel timings from Waveshare's 7B
-  example (HPW/HBP/HFP 162/152/48, VPW/VBP/VFP 45/13/3, 30 MHz). Not yet flashed — beta.
+  example (HPW/HBP/HFP 162/152/48, VPW/VBP/VFP 45/13/3, 30 MHz). Display confirmed on
+  real hardware; touch not working yet (under investigation) — beta.
+
+### Fixed
+
+- **Touch-LCD-7B: brightness slider was reversed** (#17). The expander's PWM register
+  is inverted (higher value = darker); the slider now brightens to the right, and PWR
+  turns the backlight fully off.
 
 ### Changed
 
