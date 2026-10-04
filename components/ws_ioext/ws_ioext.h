@@ -23,14 +23,21 @@ class WsIoExtComponent : public Component, public i2c::I2CDevice {
   float get_setup_priority() const override { return setup_priority::IO; }
 
   void set_initial_output(uint8_t v) { this->output_bits_ = v; }
+  void set_touch_reset(uint8_t rst, InternalGPIOPin *int_pin) {
+    this->touch_rst_ = rst;
+    this->touch_int_ = int_pin;
+  }
   bool digital_read(uint8_t pin);
   void digital_write(uint8_t pin, bool value);
   void write_pwm(uint8_t value);
 
  protected:
   bool write_reg_(uint8_t reg, uint8_t value);
+  void reset_touch_();
   // 晶片只能整個位元組寫入,所以保留一份輸出影子暫存器
   uint8_t output_bits_{0xDF};
+  uint8_t touch_rst_{};
+  InternalGPIOPin *touch_int_{nullptr};
 };
 
 class WsIoExtGPIOPin : public GPIOPin, public Parented<WsIoExtComponent> {

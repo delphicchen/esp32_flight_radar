@@ -120,6 +120,10 @@ i2c:
 
 ws_ioext:
   - id: io_ex                   # 微雪 IO 擴充 @0x24;開機寫入 0xDF(IO5=0 → GPIO19/20 走 USB)
+    touch_reset_pin: 1          # EXIO1 = 觸控 reset;GT911 重置由這裡做(時序見 __init__.py)
+    touch_int_pin:
+      number: GPIO4             # GT911 INT,與下方 touchscreen 共用
+      allow_other_uses: true
 
 # ---- microSD 的 CS(EXIO4)----
 # 那條 SPI 上只有 SD 一個裝置,所以 CS 開機拉低就不必再動:restore_mode: ALWAYS_OFF
@@ -151,16 +155,16 @@ light:
     name: Backlight
     restore_mode: RESTORE_DEFAULT_ON
 
-# ---- Touch (GT911, I2C, reset via EXIO1) ----
+# ---- Touch (GT911, I2C, reset via EXIO1 — done by ws_ioext) ----
 touchscreen:
   - platform: gt911
     id: my_touch
     display: main_display
     update_interval: 20ms
-    interrupt_pin: GPIO4        # GT911 INT
-    reset_pin:
-      ws_ioext: io_ex
-      number: 1                 # EXIO1 = touch reset (verify)
+    interrupt_pin:
+      number: GPIO4             # GT911 INT
+      allow_other_uses: true
+    # 不設 reset_pin:內建的重置時序太短,改由 ws_ioext 在開機時做(#17)
     transform:
       # 與 display 的 ${disp_rotation} 成對 —— LVGL 接手旋轉後會把 display
       # rotation 歸零(lvgl_esphome.cpp),觸控不會自己跟著轉,得自己鏡像。

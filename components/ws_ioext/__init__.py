@@ -37,6 +37,8 @@ WsIoExtGPIOPin = ws_ioext_ns.class_(
 
 CONF_WS_IOEXT = "ws_ioext"
 CONF_INITIAL_OUTPUT = "initial_output"
+CONF_TOUCH_RESET_PIN = "touch_reset_pin"
+CONF_TOUCH_INT_PIN = "touch_int_pin"
 
 CONFIG_SCHEMA = (
     cv.Schema(
@@ -46,6 +48,12 @@ CONFIG_SCHEMA = (
             # IO5 拉低 —— IO5 選擇 GPIO19/20 走 USB(0)還是 CAN(1),
             # 拉高會讓 USB 序列埠/燒錄口斷線。
             cv.Optional(CONF_INITIAL_OUTPUT, default=0xDF): cv.hex_uint8_t,
+            # GT911 重置(兩個都給才會做)。ESPHome gt911 內建的重置只拉低 2ms、
+            # 放開後等 56ms,7B 上觸控沒反應(#17);改在這裡照官方 08_TOUCH 範例的
+            # 100/100/200ms 時序做,gt911 那邊就不要再設 reset_pin。
+            # INT 腳同時給 gt911 用,兩邊都要加 allow_other_uses: true。
+            cv.Optional(CONF_TOUCH_RESET_PIN): cv.int_range(min=0, max=7),
+            cv.Optional(CONF_TOUCH_INT_PIN): pins.internal_gpio_output_pin_schema,
         }
     )
     .extend(cv.COMPONENT_SCHEMA)
@@ -58,6 +66,9 @@ async def to_code(config):
     await cg.register_component(var, config)
     await i2c.register_i2c_device(var, config)
     cg.add(var.set_initial_output(config[CONF_INITIAL_OUTPUT]))
+    if CONF_TOUCH_RESET_PIN in config and CONF_TOUCH_INT_PIN in config:
+        int_pin = await cg.gpio_pin_expression(config[CONF_TOUCH_INT_PIN])
+        cg.add(var.set_touch_reset(config[CONF_TOUCH_RESET_PIN], int_pin))
 
 
 WS_IOEXT_PIN_SCHEMA = pins.gpio_base_schema(

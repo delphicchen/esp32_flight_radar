@@ -25,6 +25,10 @@ out first, because that is the part that costs you time.
 - **Touch-LCD-7B: brightness slider was reversed** (#17). The expander's PWM register
   is inverted (higher value = darker); the slider now brightens to the right, and PWR
   turns the backlight fully off.
+- **Touch-LCD-7B: longer GT911 reset** (#17, touch not working). ESPHome's built-in
+  reset holds RST low for 2 ms and starts talking 56 ms later; the reset is now done by
+  `ws_ioext` at boot with the timing from Waveshare's touch example (100/100/200 ms).
+  Unconfirmed whether this is the cause — beta.
 
 ### Changed
 

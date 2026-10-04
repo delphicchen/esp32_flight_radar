@@ -10,7 +10,26 @@ void WsIoExtComponent::setup() {
   // 全部設成輸出,再一次寫入初始輸出值(官方範例同樣是 0xFF 全輸出)
   if (!this->write_reg_(REG_MODE, 0xFF) || !this->write_reg_(REG_OUTPUT, this->output_bits_)) {
     this->mark_failed();
+    return;
   }
+  if (this->touch_int_ != nullptr)
+    this->reset_touch_();
+}
+
+// 照官方 08_TOUCH 的 touch_gt911_init():RST 低 → INT 低 → RST 高。重置放開時
+// INT 為低 → GT911 用位址 0x5D。共阻塞約 400ms,只在開機做一次。
+void WsIoExtComponent::reset_touch_() {
+  this->touch_int_->setup();
+  this->touch_int_->pin_mode(gpio::FLAG_OUTPUT);
+  this->touch_int_->digital_write(false);
+  this->digital_write(this->touch_rst_, false);
+  delay(100);
+  this->touch_int_->digital_write(false);
+  delay(100);
+  this->digital_write(this->touch_rst_, true);
+  delay(200);
+  this->touch_int_->pin_mode(gpio::FLAG_INPUT);  // 交還給 gt911 當中斷輸入
+  ESP_LOGD(TAG, "GT911 reset via EXIO%u done", this->touch_rst_);
 }
 
 void WsIoExtComponent::dump_config() {
