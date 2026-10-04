@@ -28,6 +28,12 @@ out first, because that is the part that costs you time.
 - **Touch-LCD-7B: longer GT911 reset** (#17, touch not working). ESPHome's built-in
   reset holds RST low for 2 ms and starts talking 56 ms later; the reset is now done by
   `ws_ioext` at boot with the timing from Waveshare's touch example (100/100/200 ms).
+- **Weather echo never drew on 1024×600 S3 boards** (#17, `echo buf alloc fail`). The
+  echo layer needed ~2 MB of PSRAM in two blocks (a 952 KB overlay plus a 1 MB tile
+  decode buffer); the 7B had ~930 KB free. Tiles are now decoded straight into the
+  overlay (no decode buffer), and the overlay is stored at half resolution and scaled
+  up when blended. Echo memory drops to ~240 KB on 1024×600 and ~155 KB on 800×480;
+  rain areas look the same.
   Unconfirmed whether this is the cause — beta.
 
 ### Changed

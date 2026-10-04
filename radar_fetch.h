@@ -123,18 +123,23 @@ inline std::vector<AcInfo> g_result;
 inline volatile bool g_states_ready = false;
 inline std::string g_route;
 inline volatile bool g_route_ready = false;
-inline uint8_t *g_echo_buf = nullptr;    // 離屏合成緩衝 456*456*3 (PSRAM)
+// 回波以 1/ECHO_DS 解析度存放,混進底圖時每格放大成 ECHO_DS×ECHO_DS。
+// 降雨本來就是大片色塊,RainViewer 原圖精細度也差不多這個等級,看不出差別;
+// 1024x600 板(畫布 570)的緩衝從 952KB 降到 238KB。7B 的 PSRAM 只剩 ~930KB,
+// 原本 952KB + 1MB tile 暫存根本配不到,雨雲永遠畫不出來(#17)。
+#define ECHO_DS 2
+#define ECHO_N ((RADAR_CANVAS + ECHO_DS - 1) / ECHO_DS)
+inline uint8_t *g_echo_buf = nullptr;    // 離屏合成緩衝 ECHO_N*ECHO_N*3 (PSRAM)
 inline volatile bool g_echo_ready = false;   // true=g_echo_buf 有整幀待主迴圈換上
-// 回波非透明像素的逐列水平範圍(x0 > x1 表示該列全透明)。
-// 底圖重建每次都要把回波混進去,原本是整張 RADAR_CANVAS² 逐像素掃(570² =
-// 324,900 次,每次讀 3 bytes PSRAM ≈ 950KB),但降雨通常只佔畫面一小塊、常常
-// 甚至整張全空。合成時順手記下每列的左右界,混合就只走真的有資料的區段;
+// 回波非透明格的逐列水平範圍(以回波格為單位,x0 > x1 表示該列全透明)。
+// 底圖重建每次都要把回波混進去,降雨通常只佔畫面一小塊、常常甚至整張全空。
+// 合成時順手記下每列的左右界,混合就只走真的有資料的區段;
 // 空白列連一次 PSRAM 讀取都不必。初值 0/0 是安全的:未寫入的緩衝 alpha=0,
 // 混合迴圈本來就會跳過。
-inline int16_t g_echo_x0[RADAR_CANVAS];
-inline int16_t g_echo_x1[RADAR_CANVAS];
+inline int16_t g_echo_x0[ECHO_N];
+inline int16_t g_echo_x1[ECHO_N];
 inline void echo_spans_clear() {
-  for (int y = 0; y < RADAR_CANVAS; y++) { g_echo_x0[y] = RADAR_CANVAS; g_echo_x1[y] = -1; }
+  for (int y = 0; y < ECHO_N; y++) { g_echo_x0[y] = ECHO_N; g_echo_x1[y] = -1; }
 }
 inline volatile bool g_auth_fail = false;
 struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
@@ -589,84 +594,76 @@ inline void do_speakers(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
-// ---- pngle 解碼 context:把 tile 像素寫進 512x512 RGBA 暫存 ----
-struct PngCtx { uint8_t *rgba; int w, h; };
+// ---- pngle 解碼 context:tile 像素解出來就直接寫進 g_echo_buf ----
+// 原本先把整塊 tile 解進 512x512 RGBA 暫存(1MB PSRAM)再逐格取樣。改成事先算好
+// 「tile 第 tx 欄 / 第 ty 列覆蓋哪幾個回波格」,解碼回呼查表直接寫,省掉暫存;
+// 每格取的仍是格中心落到的那個 tile 像素(最近鄰),結果跟原本取樣一致。
+struct PngCtx {
+  int w, h;
+  const int16_t *xlo, *xhi, *ylo, *yhi;   // tile 欄/列 → 回波格範圍 [lo,hi],lo>hi=不覆蓋
+};
 
 inline void png_on_draw(pngle_t *p, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                         const uint8_t rgba[4]) {
+  if (rgba[3] < 32) return;   // 無降雨=透明
   PngCtx *c = (PngCtx *) pngle_get_user_data(p);
+  lv_color_t col = lv_color_make(rgba[0], rgba[1], rgba[2]);
   for (uint32_t yy = y; yy < y + h && (int) yy < c->h; yy++) {
-    for (uint32_t xx = x; xx < x + w && (int) xx < c->w; xx++) {
-      uint8_t *d = c->rgba + ((size_t) yy * c->w + xx) * 4;
-      d[0] = rgba[0]; d[1] = rgba[1]; d[2] = rgba[2]; d[3] = rgba[3];
+    for (int ey = c->ylo[yy]; ey <= c->yhi[yy]; ey++) {
+      int dy = ey * ECHO_DS + ECHO_DS / 2 - RADAR_CX;
+      uint8_t *orow = g_echo_buf + (size_t) ey * ECHO_N * 3;
+      for (uint32_t xx = x; xx < x + w && (int) xx < c->w; xx++) {
+        for (int ex = c->xlo[xx]; ex <= c->xhi[xx]; ex++) {
+          int dx = ex * ECHO_DS + ECHO_DS / 2 - RADAR_CX;
+          if (dx * dx + dy * dy > RADAR_R * RADAR_R) continue;   // 圓外(留透明)
+          uint8_t *op = orow + (size_t) ex * 3;
+          op[0] = col.full & 0xFF;
+          op[1] = (col.full >> 8) & 0xFF;
+          op[2] = rgba[3];
+          if (ex < g_echo_x0[ey]) g_echo_x0[ey] = (int16_t) ex;   // 這列有降雨的左右界,
+          if (ex > g_echo_x1[ey]) g_echo_x1[ey] = (int16_t) ex;   // 供底圖混合跳過空白區
+        }
+      }
     }
   }
 }
 
-// 下載單一 tile PNG → pngle 解碼進 tmp RGBA → 取樣合成進 g_echo_buf 的子矩形
-// canvas 3 bytes/px:[color_lo][color_hi][alpha](= LVGL TRUE_COLOR_ALPHA 16bpp)
-inline void echo_composite_tile(const std::string &url, uint8_t *tmp, int tw, int th,
+// 單一軸向的對照表:回波第 e 格(取格中心的畫布像素)落在 tile t 的第幾欄/列,
+// 反過來記成每欄/列覆蓋的回波格範圍。座標單調,所以每欄/列對到的是連續一段。
+inline void echo_axis_map(int16_t *lo, int16_t *hi, int n, int t, float b,
+                          float tile_km, float kmpp) {
+  for (int k = 0; k < n; k++) { lo[k] = INT16_MAX; hi[k] = -1; }
+  const float inv_tile = 1.0f / tile_km;
+  for (int e = 0; e < ECHO_N; e++) {
+    float km = b * tile_km + (float) (e * ECHO_DS + ECHO_DS / 2 - RADAR_CX) * kmpp;
+    if ((int) floorf(km * inv_tile) != t) continue;
+    int k = (int) ((km - (float) t * tile_km) * inv_tile * (float) n);
+    if (k < 0 || k >= n) continue;
+    if (e < lo[k]) lo[k] = (int16_t) e;
+    if (e > hi[k]) hi[k] = (int16_t) e;
+  }
+}
+
+// 下載單一 tile PNG → pngle 邊解碼邊寫進 g_echo_buf 對應的回波格
+// 回波格 3 bytes:[color_lo][color_hi][alpha](= LVGL TRUE_COLOR_ALPHA 16bpp)
+// map:4*tw 個 int16 的對照表空間(tw == th)
+inline void echo_composite_tile(const std::string &url, int16_t *map, int tw, int th,
                                 int i, int j, float bx, float by,
                                 float tile_km, float range) {
   int st = 0;
   std::string png = http_req(url, false, "", nullptr, "", st, 32768);
   if (st != 200 || png.empty()) { ESP_LOGW("radar_bg", "tile http %d", st); return; }
-  memset(tmp, 0, (size_t) tw * th * 4);
+  const float kmpp = 2.0f * range / (float) RADAR_CANVAS;
+  PngCtx ctx = { tw, th, map, map + tw, map + 2 * tw, map + 3 * tw };
+  echo_axis_map(map, map + tw, tw, i, bx, tile_km, kmpp);
+  echo_axis_map(map + 2 * tw, map + 3 * tw, th, j, by, tile_km, kmpp);
   pngle_t *p = pngle_new();
   if (!p) return;
-  PngCtx ctx = { tmp, tw, th };
   pngle_set_user_data(p, &ctx);
   pngle_set_draw_callback(p, png_on_draw);
   int fed = pngle_feed(p, png.data(), png.size());
-  int iw = pngle_get_width(p);
   pngle_destroy(p);
-  if (iw <= 0) iw = tw;
-  if (fed < 0) { ESP_LOGW("radar_bg", "png decode err"); return; }
-
-  float kmpp = 2.0f * range / (float) RADAR_CANVAS;
-  float inv = tile_km / kmpp;
-  int x_lo = (int) floorf(RADAR_CX + ((float) i - bx) * inv);
-  int x_hi = (int) ceilf (RADAR_CX + ((float) (i + 1) - bx) * inv);
-  int y_lo = (int) floorf(RADAR_CX + ((float) j - by) * inv);
-  int y_hi = (int) ceilf (RADAR_CX + ((float) (j + 1) - by) * inv);
-  if (x_lo < 0) x_lo = 0; if (x_hi > RADAR_CANVAS) x_hi = RADAR_CANVAS;
-  if (y_lo < 0) y_lo = 0; if (y_hi > RADAR_CANVAS) y_hi = RADAR_CANVAS;
-  // 每像素原本要做 2 次浮點除法(ESP32-S3 的 FPU 沒有除法指令,編譯器會展開成
-  // 倒數近似 + 牛頓迭代)。tile_km 在整個迴圈裡是常數,先取倒數改成乘法,kx/ky
-  // 也改成沿著掃描線累加,內圈就只剩乘加。~32 萬像素下省下的是幾十毫秒等級,
-  // 但這段本來就跑在背景 task,實際感受有限。
-  const float inv_tile = 1.0f / tile_km;
-  const float inv_tile_tw = inv_tile * (float) tw;
-  const float inv_tile_th = inv_tile * (float) th;
-  const float i_tile = (float) i * tile_km;
-  const float j_tile = (float) j * tile_km;
-  const float kx0 = bx * tile_km + (float) (x_lo - RADAR_CX) * kmpp;
-  for (int y = y_lo; y < y_hi; y++) {
-    float ky = by * tile_km + (float) (y - RADAR_CX) * kmpp;
-    int tj = (int) floorf(ky * inv_tile);
-    if (tj != j) continue;
-    int ty = (int) ((ky - j_tile) * inv_tile_th);
-    if (ty < 0 || ty >= th) continue;
-    int dy2 = (y - RADAR_CX) * (y - RADAR_CX);
-    uint8_t *orow = g_echo_buf + (size_t) y * RADAR_CANVAS * 3;
-    float kx = kx0;
-    for (int x = x_lo; x < x_hi; x++, kx += kmpp) {
-      int ti = (int) floorf(kx * inv_tile);
-      if (ti != i) continue;
-      if ((x - RADAR_CX) * (x - RADAR_CX) + dy2 > RADAR_R * RADAR_R) continue;   // 圓外(留透明)
-      int tx = (int) ((kx - i_tile) * inv_tile_tw);
-      if (tx < 0 || tx >= tw) continue;
-      uint8_t *sp = tmp + ((size_t) ty * tw + tx) * 4;
-      if (sp[3] < 32) continue;   // 無降雨=透明
-      lv_color_t col = lv_color_make(sp[0], sp[1], sp[2]);
-      uint8_t *op = orow + (size_t) x * 3;
-      op[0] = col.full & 0xFF;
-      op[1] = (col.full >> 8) & 0xFF;
-      op[2] = sp[3];
-      if (x < g_echo_x0[y]) g_echo_x0[y] = (int16_t) x;   // 這列有降雨的左右界,
-      if (x > g_echo_x1[y]) g_echo_x1[y] = (int16_t) x;   // 供底圖混合跳過空白區
-    }
-  }
+  if (fed < 0) ESP_LOGW("radar_bg", "png decode err");
 }
 
 // RainViewer:抓最新圖層 → 2x2 拼磚,全程背景下載+解碼+合成到 g_echo_buf
@@ -698,21 +695,21 @@ inline void do_echo(const Job &j) {
   long y0 = (long) floorf(yf - 0.5f);
   float bx = xf - x0, by = yf - y0;
 
-  // 緩衝(PSRAM):離屏 456*456*3 + tile 暫存 512*512*4
+  // 緩衝(PSRAM):回波格 ECHO_N*ECHO_N*3 + tile→回波格對照表 4*512 int16(4KB)
   const int TW = 512, TH = 512;
   if (!g_echo_buf)
-    g_echo_buf = (uint8_t *) heap_caps_malloc((size_t) RADAR_CANVAS * RADAR_CANVAS * 3, MALLOC_CAP_SPIRAM);
-  static uint8_t *tmp = nullptr;
-  if (!tmp) tmp = (uint8_t *) heap_caps_malloc((size_t) TW * TH * 4, MALLOC_CAP_SPIRAM);
-  if (!g_echo_buf || !tmp) { ESP_LOGE("radar_bg", "echo buf alloc fail"); return; }
+    g_echo_buf = (uint8_t *) heap_caps_malloc((size_t) ECHO_N * ECHO_N * 3, MALLOC_CAP_SPIRAM);
+  static int16_t *map = nullptr;
+  if (!map) map = (int16_t *) heap_caps_malloc((size_t) TW * 4 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+  if (!g_echo_buf || !map) { ESP_LOGE("radar_bg", "echo buf alloc fail"); return; }
 
-  memset(g_echo_buf, 0, (size_t) RADAR_CANVAS * RADAR_CANVAS * 3);   // 先清成透明(離屏,不影響畫面)
+  memset(g_echo_buf, 0, (size_t) ECHO_N * ECHO_N * 3);   // 先清成透明(離屏,不影響畫面)
   echo_spans_clear();   // 逐列範圍跟著歸零,不然會留著上一幀的降雨區
   for (int k = 0; k < 4; k++) {
     char url[200];
     snprintf(url, sizeof(url), "%s%s/512/%d/%ld/%ld/2/1_1.png",
              host.c_str(), path.c_str(), zbest, x0 + k % 2, y0 + k / 2);
-    echo_composite_tile(url, tmp, TW, TH, k % 2, k / 2, bx, by, tkm, j.range);
+    echo_composite_tile(url, map, TW, TH, k % 2, k / 2, bx, by, tkm, j.range);
     vTaskDelay(pdMS_TO_TICKS(2500));   // 每塊間隔,分散 PSRAM/網路壓力
   }
   xSemaphoreTake(mtx(), portMAX_DELAY);
@@ -1100,18 +1097,22 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       c_gen = maptiles::generation;
     }
   }
-  // 回波預混合:g_echo_buf 為 [color_lo][color_hi][alpha],逐像素混進底圖。
-  // 只走 g_echo_x0/x1 記下的逐列範圍——降雨通常只佔畫面一小塊,沒下雨時整張
-  // 全空,這樣就從「必掃 324,900 像素、讀 950KB PSRAM」變成只碰真的有資料的
-  // 區段。底圖重建每次都做這一步(不進快取),所以省下的是每次的固定成本。
+  // 回波預混合:g_echo_buf 為 [color_lo][color_hi][alpha],每格放大成
+  // ECHO_DS×ECHO_DS 混進底圖。只走 g_echo_x0/x1 記下的逐列範圍——降雨通常只佔
+  // 畫面一小塊,沒下雨時整張全空,只碰真的有資料的區段。底圖重建每次都做這一步
+  // (不進快取),所以省下的是每次的固定成本。
   if (echo_show && radar_bg::g_echo_buf) {
     lv_color_t *rows = (lv_color_t *) (void *) img->data;
     for (int y = 0; y < RADAR_CANVAS; y++) {
-      const int xa = radar_bg::g_echo_x0[y], xb = radar_bg::g_echo_x1[y];
+      const int ey = y / ECHO_DS;
+      const int xa = radar_bg::g_echo_x0[ey], xb = radar_bg::g_echo_x1[ey];
       if (xa > xb) continue;   // 整列無降雨:一次 PSRAM 讀取都不必
-      const uint8_t *sp = radar_bg::g_echo_buf + ((size_t) y * RADAR_CANVAS + xa) * 3;
-      lv_color_t *dst = rows + (size_t) y * RADAR_CANVAS + xa;
-      for (int x = xa; x <= xb; x++, sp += 3, dst++) {
+      const uint8_t *srow = radar_bg::g_echo_buf + (size_t) ey * ECHO_N * 3;
+      const int x0 = xa * ECHO_DS;
+      const int x1 = std::min(xb * ECHO_DS + ECHO_DS - 1, RADAR_CANVAS - 1);
+      lv_color_t *dst = rows + (size_t) y * RADAR_CANVAS + x0;
+      for (int x = x0; x <= x1; x++, dst++) {
+        const uint8_t *sp = srow + (size_t) (x / ECHO_DS) * 3;
         if (sp[2] < 8) continue;   // 區段內的空隙,保留底圖
         lv_color_t fg;
         fg.full = (uint16_t) sp[0] | ((uint16_t) sp[1] << 8);
