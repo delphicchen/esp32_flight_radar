@@ -62,6 +62,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "tz_db.h"
 #include "freertos/queue.h"
 #include "esp_http_client.h"
 #include "esp_http_server.h"
@@ -146,6 +147,12 @@ struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
 inline WxInfo g_wx;
 inline volatile bool g_wx_ready = false;   // true=g_wx 有新資料待主迴圈取用
 inline bool g_wx_valid = false;            // 曾成功抓過至少一次
+// 時區 AUTO:天氣請求順便帶 timezone=auto,Open-Meteo 依座標回 IANA 名稱 → 查 tz_db.h
+// 轉 POSIX。g_tz_new 是背景 task 交給主迴圈的(g_tz_ready 當柵欄);
+// g_tz_auto 只歸主迴圈所有,tz_posix(TZ_AUTO) 回傳的就是它。
+inline std::string g_tz_new;
+inline volatile bool g_tz_ready = false;
+inline std::string g_tz_auto;
 inline std::string g_speakers;             // HA 喇叭清單:每行 entity_id|friendly_name
 inline volatile bool g_speakers_ready = false;
 inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token 錯 / <=0 連不上
@@ -547,7 +554,8 @@ inline void do_weather(const Job &j) {
   char url[224];
   snprintf(url, sizeof(url),
            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-           "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+           "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m"
+           "&timezone=auto",
            j.lat, j.lon);
   int st = 0;
   std::string r = http_req(url, false, "", nullptr, "", st);
@@ -557,7 +565,23 @@ inline void do_weather(const Job &j) {
   }
   WxInfo w{};
   bool got = false;
+  std::string tz;
   esphome::json::parse_json(r, [&](JsonObject root) -> bool {
+    // 時區:IANA 名稱查得到就用完整 POSIX(含日光節約規則);查不到退回目前的
+    // UTC 偏移組固定時區,日光節約切換後要等下一次天氣更新(≤10 分鐘)才跟上
+    const char *name = root["timezone"] | "";
+    const char *px = tzdb::lookup(name);
+    if (px) {
+      tz = px;
+    } else if (!root["utc_offset_seconds"].isNull()) {
+      int off = root["utc_offset_seconds"] | 0;
+      int a = abs(off) / 60;
+      char b[24];   // POSIX 的正負號與 UTC 偏移相反:UTC-5 寫成 <-0500>5:00
+      snprintf(b, sizeof(b), "<%c%02d%02d>%s%d:%02d", off < 0 ? '-' : '+', a / 60, a % 60,
+               off < 0 ? "" : "-", a / 60, a % 60);
+      tz = b;
+    }
+    if (!tz.empty()) ESP_LOGI("radar_bg", "timezone %s -> %s", name, tz.c_str());
     JsonObject cur = root["current"];
     if (cur.isNull()) return true;
     w.temp = cur["temperature_2m"] | NAN;
@@ -567,6 +591,12 @@ inline void do_weather(const Job &j) {
     got = !isnan(w.temp);
     return true;
   });
+  if (!tz.empty()) {
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_tz_new = tz;
+    g_tz_ready = true;
+    xSemaphoreGive(mtx());
+  }
   if (!got) { ESP_LOGW("radar_bg", "weather parse fail"); return; }
   xSemaphoreTake(mtx(), portMAX_DELAY);
   g_wx = w;
@@ -697,8 +727,16 @@ inline void do_echo(const Job &j) {
 
   // 緩衝(PSRAM):回波格 ECHO_N*ECHO_N*3 + tile→回波格對照表 4*512 int16(4KB)
   const int TW = 512, TH = 512;
-  if (!g_echo_buf)
+  // 配到就先清成透明。底圖混色只看 g_echo_buf 非空,若下面 map 配置失敗提早
+  // return,沒清過的 PSRAM 雜訊會被當成回波 —— 逐列範圍初值 0/0,每列第 0 欄
+  // 混進雜訊,畫面最左邊出現一條 1px 彩色直線(#19)。
+  if (!g_echo_buf) {
     g_echo_buf = (uint8_t *) heap_caps_malloc((size_t) ECHO_N * ECHO_N * 3, MALLOC_CAP_SPIRAM);
+    if (g_echo_buf) {
+      memset(g_echo_buf, 0, (size_t) ECHO_N * ECHO_N * 3);
+      echo_spans_clear();
+    }
+  }
   static int16_t *map = nullptr;
   if (!map) map = (int16_t *) heap_caps_malloc((size_t) TW * 4 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
   if (!g_echo_buf || !map) { ESP_LOGE("radar_bg", "echo buf alloc fail"); return; }
@@ -969,7 +1007,11 @@ inline void type_fill(std::string &ty, std::string &reg, std::string &desc, uint
 
 // ---- 時區:下拉選單 index → POSIX TZ 字串(供 time.set_timezone 執行期切換)----
 // 顯示名清單在 ui/ 的 dropdown options,兩邊 index 必須對齊。
+// 新項目一律加在最後:NVS 存的是 index,插隊會讓既有裝置的時區整個錯位。
+// TZ_AUTO = 依座標自動(見 g_tz_auto),還沒抓到過就先用 UTC。
+#define TZ_AUTO 15
 inline const char *tz_posix(int i) {
+  if (i == TZ_AUTO) return g_tz_auto.empty() ? "UTC0" : g_tz_auto.c_str();
   static const char *const T[] = {
       "CST-8",                            // 0 Taipei
       "JST-9",                            // 1 Tokyo
@@ -983,6 +1025,10 @@ inline const char *tz_posix(int i) {
       "EST5EDT,M3.2.0,M11.1.0",           // 9 New York
       "PST8PDT,M3.2.0,M11.1.0",           // 10 Los Angeles
       "UTC0",                             // 11 UTC
+      "CST6CDT,M3.2.0,M11.1.0",           // 12 Chicago
+      "MST7MDT,M3.2.0,M11.1.0",           // 13 Denver
+      "MST7",                             // 14 Phoenix(亞利桑那不實施日光節約)
+      // 15 = TZ_AUTO,在上面處理
   };
   const int n = sizeof(T) / sizeof(T[0]);
   return (i >= 0 && i < n) ? T[i] : T[0];

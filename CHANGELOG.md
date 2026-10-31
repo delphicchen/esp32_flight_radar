@@ -20,8 +20,22 @@ out first, because that is the part that costs you time.
   example (HPW/HBP/HFP 162/152/48, VPW/VBP/VFP 45/13/3, 30 MHz). Display confirmed on
   real hardware; touch not working yet (under investigation) — beta.
 
+- **Timezone AUTO (BY LOCATION)** (#20). The local-weather request to Open-Meteo now asks
+  for the timezone at your coordinates; its IANA name (`America/Chicago`) is looked up in a
+  table generated from tzdata (`tz_db.h`, `tools/make_tz_db.py`, 420 zones, ~17 KB) to get
+  the full rule, daylight saving included. A name not in the table falls back to the current
+  UTC offset, refreshed every 10 minutes. The last result is kept in NVS, so the clock is
+  right at boot before the network is up.
+- **CHICAGO, DENVER and PHOENIX timezones** (#20). Added at the end of the list so saved
+  choices on existing devices keep their meaning.
+
 ### Fixed
 
+- **Thin multicoloured line down the left edge with ECHO on** (#19). When the echo buffers
+  could not all be allocated, the overlay was left as uninitialised PSRAM while still being
+  blended, and the first column of every row picked up the noise. The overlay is now
+  cleared as soon as it is allocated. On the 5B the allocation itself failed for the same
+  reason as on the 7B, so rain never drew either; the smaller buffers below fix that.
 - **Touch-LCD-7B: brightness slider was reversed** (#17). The expander's PWM register
   is inverted (higher value = darker); the slider now brightens to the right, and PWR
   turns the backlight fully off.
