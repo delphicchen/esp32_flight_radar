@@ -7070,7 +7070,8 @@ lvgl:
                 text_color: 0x04180C
             # 顯示名的 index 必須對齊 radar_bg::tz_posix() 的 POSIX 陣列
             # 括號內為標準時間偏移;有日光節約的時區(LONDON/PARIS/BERLIN/NEW YORK/
-            # LOS ANGELES)夏季實際會 +1,實際換算由 tz_posix() 的 POSIX 字串處理
+            # LOS ANGELES/CHICAGO/DENVER)夏季實際會 +1,實際換算由 tz_posix() 的 POSIX 字串處理
+            # 新項目只能加在最後(NVS 存 index);AUTO = 依座標自動,見 radar_bg::g_tz_auto
             options:
               - "TAIPEI (UTC+8)"
               - "TOKYO (UTC+9)"
@@ -7084,6 +7085,10 @@ lvgl:
               - "NEW YORK (UTC-5)"
               - "LOS ANGELES (UTC-8)"
               - "UTC"
+              - "CHICAGO (UTC-6)"
+              - "DENVER (UTC-7)"
+              - "PHOENIX (UTC-7)"
+              - "AUTO (BY LOCATION)"
             on_value:
               - lambda: |-
                   int i = (int) x;

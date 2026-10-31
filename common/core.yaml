@@ -45,6 +45,7 @@ esphome:
   includes:
     - map_tiles.h          # 取代 map_data.h:地圖改成執行期從 maps 分割區載入
     - aircraft_db.h        # 產生器:tools/make_aircraft_db.py(機型輪廓 + 規格表)
+    - tz_db.h              # 產生器:tools/make_tz_db.py(時區 AUTO 用的 IANA→POSIX 表)
     - radar_fetch.h
     - alarm.h
   on_boot:
@@ -68,6 +69,8 @@ esphome:
                                      id(src_dd), id(unit_dd) };
           for (auto *d : dds) lv_dropdown_set_symbol(d->obj, nullptr);
           // 還原時區:NVS 的 index → POSIX TZ 執行期套用,並把下拉同步到該項
+          // AUTO 先用上次存下的結果,開機後第一次天氣更新再校正
+          radar_bg::g_tz_auto = id(tz_auto);
           id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           id(tz_select).publish_state((size_t) id(tz_sel));   // 網頁的 Timezone 也同步
@@ -416,6 +419,10 @@ select:
       - "NEW YORK (UTC-5)"
       - "LOS ANGELES (UTC-8)"
       - "UTC"
+      - "CHICAGO (UTC-6)"
+      - "DENVER (UTC-7)"
+      - "PHOENIX (UTC-7)"
+      - "AUTO (BY LOCATION)"
     set_action:
       - lambda: |-
           auto i = id(tz_select).index_of(x);
@@ -492,6 +499,7 @@ globals:
   - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
   - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
   - { id: tz_sel, type: int, restore_value: true, initial_value: '0' }             # 時區下拉選擇(index，對齊 tz_posix)
+  - { id: tz_auto, type: std::string, restore_value: true, max_restore_data_length: 48 }   # AUTO 上次查到的 POSIX TZ(開機不必等網路)
   # 夜間模式(背光無 PWM 的板子用):100=不暗化 5=最暗;night_ov 為 LVGL top layer 遮罩
   - { id: night_level, type: int, restore_value: true, initial_value: '100' }
   - { id: night_ov, type: 'lv_obj_t *', initial_value: 'nullptr' }
@@ -1081,6 +1089,19 @@ interval:
               (id(wx_last_ms) == 0 || millis() - id(wx_last_ms) > 600000)) {
             id(wx_last_ms) = millis();
             radar_bg::request_weather(id(home_lat).state, id(home_lon).state);
+          }
+          // 時區 AUTO:每次天氣更新都帶回座標所在時區;有變才寫 NVS,選 AUTO 時才套用
+          if (radar_bg::g_tz_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_tz_ready = false;
+            std::string tz = radar_bg::g_tz_new;
+            xSemaphoreGive(radar_bg::mtx());
+            if (tz != radar_bg::g_tz_auto) {
+              radar_bg::g_tz_auto = tz;
+              id(tz_auto) = tz;
+              if (id(tz_sel) == TZ_AUTO)
+                id(rtc_time).set_timezone(radar_bg::tz_posix(TZ_AUTO));
+            }
           }
           if (radar_bg::g_wx_ready) {
             xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);

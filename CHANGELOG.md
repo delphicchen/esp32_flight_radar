@@ -11,6 +11,27 @@ out first, because that is the part that costs you time.
   coordinates line), mirrored in the web UI / Home Assistant as the *Radar Sweep* switch,
   stored in NVS. With the sweep off the sweep line and its tail are hidden and aircraft no
   longer flash when swept; they stay at their base colour.
+- **Timezone AUTO (BY LOCATION)** (#20). The local-weather request to Open-Meteo now asks
+  for the timezone at your coordinates; its IANA name (`America/Chicago`) is looked up in a
+  table generated from tzdata (`tz_db.h`, `tools/make_tz_db.py`, 420 zones, ~17 KB) to get
+  the full rule, daylight saving included. A name not in the table falls back to the current
+  UTC offset, refreshed every 10 minutes. The last result is kept in NVS, so the clock is
+  right at boot before the network is up. (Ported from v1.3.10 on the S3 boards.)
+- **CHICAGO, DENVER and PHOENIX timezones** (#20). Added at the end of the list so saved
+  choices on existing devices keep their meaning.
+
+### Changed
+
+- **Timezone is now also in the web UI** (*Timezone*, a mirror of the on-screen TIMEZONE
+  dropdown on the alarm page; either one updates the other). A user setting the device up
+  over Wi-Fi could not find it and was left on the default Taipei time (#17). README and
+  the usage guide now say to tap the clock for alarms and timezone.
+
+### Fixed
+
+- **ECHO overlay is cleared as soon as it is allocated** (#19). If the second echo buffer
+  failed to allocate, the overlay was left as uninitialised PSRAM while still being blended,
+  which shows up as a thin coloured line down the left edge.
 
 ## [v1.4.0] — 2026-09-30
 
@@ -38,13 +59,6 @@ P4 only for now: both features below landed on `lvgl9`, so the S3 boards stay on
   40 nearest before it is published, so a busy airspace no longer costs PSRAM.
 - **Map outlines are clipped to the radar circle** instead of drawing a whole segment when
   one endpoint is inside.
-
-### Changed
-
-- **Timezone is now also in the web UI** (*Timezone*, a mirror of the on-screen TIMEZONE
-  dropdown on the alarm page; either one updates the other). A user setting the device up
-  over Wi-Fi could not find it and was left on the default Taipei time (#17). README and
-  the usage guide now say to tap the clock for alarms and timezone.
 
 ## [v1.3.9] — 2026-09-07
 
