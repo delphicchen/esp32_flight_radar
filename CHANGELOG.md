@@ -3,7 +3,9 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.3.10] — 2026-10-31
+
+Prebuilt image for the Touch-LCD-5B only for now; the Touch-LCD-7 and 7B entries are still beta.
 
 ### Added
 
