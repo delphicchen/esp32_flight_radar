@@ -5,8 +5,9 @@ out first, because that is the part that costs you time.
 
 ## [v1.3.11] — 2026-11-01
 
-Prebuilt images for every S3 board (Touch-LCD-7 and 7B as beta). Boards that were still on
-v1.3.9 also pick up v1.3.10's timezone AUTO, US timezones and ECHO fix.
+Prebuilt images for the generic 800×480, JC8048W550, Touch-LCD-5 and 5B; the Touch-LCD-7
+and 7B stay on their v1.3.9 betas for now. Boards that were still on v1.3.9 also pick up
+v1.3.10's timezone AUTO, US timezones and ECHO fix.
 
 ### Added
 
