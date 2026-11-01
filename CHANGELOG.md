@@ -3,6 +3,15 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Added
+
+- **Radar sweep on/off** (#21). New **RADAR SWEEP** button on the settings page (tap the
+  coordinates line), mirrored in the web UI / Home Assistant as the *Radar Sweep* switch,
+  stored in NVS. With the sweep off the sweep line and its tail are hidden and aircraft no
+  longer flash when swept; they stay at their base colour.
+
 ## [v1.4.0] — 2026-09-30
 
 P4 only for now: both features below landed on `lvgl9`, so the S3 boards stay on v1.3.9.

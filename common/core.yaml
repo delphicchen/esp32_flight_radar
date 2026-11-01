@@ -134,6 +134,7 @@ esphome:
           lv_dropdown_set_selected(id(src_dd)->obj, id(data_src));
           lv_dropdown_set_selected(id(unit_dd)->obj, id(units_imperial) ? 1 : 0);
       - script.execute: atc_panel_sync
+      - script.execute: sweep_apply
       - lambda: |-
           #if !RADAR_BL_PWM
           // 背光無 PWM(CH422G 擴充腳,只能開/關)→ 用 LVGL top layer 的全螢幕
@@ -446,6 +447,7 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'    # 背光關閉時仍持續抓取(設定頁勾選)
+  - { id: sweep_on, type: bool, restore_value: true, initial_value: 'true' }   # 雷達掃描線動畫開關(#21;設定頁 RADAR SWEEP / 網頁 Radar Sweep)
   - id: data_src
     type: int
     restore_value: true
@@ -667,6 +669,24 @@ script:
       - homeassistant.event:
           event: esphome.flight_radar_screenshot
 
+  - id: sweep_apply            # 掃描線開關套用:按鈕勾選狀態、掃描線/尾巴顯示、網頁開關同步
+    mode: single
+    then:
+      - lambda: |-
+          const bool on = id(sweep_on);
+          lv_obj_t *btn = (lv_obj_t *) id(sweep_btn);
+          if (on) lv_obj_add_state(btn, LV_STATE_CHECKED);
+          else    lv_obj_clear_state(btn, LV_STATE_CHECKED);
+          lv_obj_set_style_text_color(id(sweep_btn_l), lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+          // 關掉時整組線隱藏;interval 那邊也不再更新端點,飛機輝度自然衰減回基底色
+          lv_obj_t *lines[5] = { id(sweep_line)->obj,
+                                 id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
+          for (auto *l : lines) {
+            if (on) lv_obj_clear_flag(l, LV_OBJ_FLAG_HIDDEN);
+            else    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+          }
+          id(sweep_switch).publish_state(on);
+
   - id: atc_panel_sync         # 右下面板同步:ATC 圖層面板、SYS 分頁列、亮度滑桿
     mode: single
     then:
@@ -869,6 +889,22 @@ script:
           id(tp_hr)->set_selected_index(alarmpk::hh(A[i]), LV_ANIM_OFF);
           id(tp_mr)->set_selected_index(alarmpk::mm(A[i]), LV_ANIM_OFF);
           lv_obj_clear_flag((lv_obj_t *) id(tp_overlay), LV_OBJ_FLAG_HIDDEN);
+
+# ---- 掃描線開關(網頁版):與設定頁 RADAR SWEEP 按鈕是同一個設定(#21)----
+# 真正存 NVS 的是 sweep_on(globals),這裡只是鏡像,所以不設 restore_mode 還原。
+switch:
+  - platform: template
+    name: Radar Sweep
+    id: sweep_switch
+    entity_category: config
+    restore_mode: DISABLED
+    lambda: return id(sweep_on);
+    turn_on_action:
+      - lambda: id(sweep_on) = true;
+      - script.execute: sweep_apply
+    turn_off_action:
+      - lambda: id(sweep_on) = false;
+      - script.execute: sweep_apply
 
 sensor:
   - platform: wifi_signal
@@ -1437,6 +1473,7 @@ interval:
           // PSRAM 頻寬。這裡跳過所有會 invalidate 的呼叫;角度與輝度衰減仍
           // 照時間推進,所以亮起來的瞬間不會跳格。
           const bool dark = !id(backlight).current_values.is_on();
+          const bool sw = id(sweep_on);            // 關掉掃描線(#21):不畫線、不觸發飛機高亮
           const float DEG = 3.14159265f / 180.0f;
           // 掃描線 + 4 條尾巴一起算(共用三角函式基準,減少重複)。
           // 尾巴從 8 條減半成 4 條:每幀最貴的是 lv_draw_line,LVGL 在「線的外接
@@ -1445,7 +1482,7 @@ interval:
           // 角度不是等距的 k*2°:那樣第一條尾巴會離掃描線 2°,外緣多出約 2px 的
           // 縫。改成 1.75° 起跳、間隔 2°,扇形的內外緣位置和原本 1°~8° 幾乎一致。
           static const float TAIL_DEG[5] = { 0.0f, 1.75f, 3.75f, 5.75f, 7.75f };
-          if (!dark) {
+          if (!dark && sw) {
             lv_obj_t *lines[5] = { id(sweep_line)->obj,
                                    id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
             static lv_point_precise_t lp[5][2];   // LVGL 9 的 line 點座標型別
@@ -1470,9 +1507,10 @@ interval:
           for (int i = 0; i < AC_SLOTS; i++) {
             float ang = id(slot_angle)[i];
             if (ang < 0) continue;
-            bool crossed;
-            if (cur >= prev) crossed = (ang > prev && ang <= cur);
-            else             crossed = (ang > prev || ang <= cur);   // 跨 360
+            bool crossed = false;
+            if (!sw)              crossed = false;
+            else if (cur >= prev) crossed = (ang > prev && ang <= cur);
+            else                  crossed = (ang > prev || ang <= cur);   // 跨 360
             float g0 = id(slot_glow)[i];
             float g = crossed ? 1.0f : g0 * DECAY;
             id(slot_glow)[i] = g;
