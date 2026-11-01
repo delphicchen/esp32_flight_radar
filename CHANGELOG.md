@@ -3,7 +3,10 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.4.1] — 2026-11-01
+
+P4 release. Brings the P4 level with the S3 boards: timezone AUTO, US timezones and the
+web-UI Timezone (from v1.3.9/v1.3.10 on main), plus the new radar sweep toggle.
 
 ### Added
 
