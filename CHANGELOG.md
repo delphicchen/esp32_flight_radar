@@ -3,6 +3,15 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Added
+
+- **Radar sweep on/off** (#21). New **RADAR SWEEP** button on the settings page (tap the
+  coordinates line), mirrored in the web UI / Home Assistant as the *Radar Sweep* switch,
+  stored in NVS. With the sweep off the sweep line and its tail are hidden and aircraft no
+  longer flash when swept; they stay at their base colour.
+
 ## [v1.3.10] — 2026-10-31
 
 Prebuilt image for the Touch-LCD-5B only for now; the Touch-LCD-7 and 7B entries are still beta.

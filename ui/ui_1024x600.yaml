@@ -5660,6 +5660,32 @@ lvgl:
                   id(poll_when_off) = lv_obj_has_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
                   lv_obj_set_style_text_color(id(poff_btn_l),
                       lv_color_hex(id(poll_when_off) ? 0x04180C : 0x00C060), 0);
+        # 雷達掃描線動畫開關(#21;勾選=顯示,網頁 Radar Sweep 同步)
+        - button:
+            id: sweep_btn
+            x: 38
+            y: 526
+            width: 348
+            height: 48
+            radius: 5
+            checkable: true
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            checked:
+              bg_color: 0x00C060
+              border_color: 0x00C060
+            widgets:
+              - label:
+                  id: sweep_btn_l
+                  align: CENTER
+                  text: "RADAR SWEEP"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(sweep_on) = lv_obj_has_state((lv_obj_t *) id(sweep_btn), LV_STATE_CHECKED);
+              - script.execute: sweep_apply
         # 顯示單位(下拉;公制/英制,影響溫度/速度/距離/高度/範圍顯示)
         # options 的 index 對齊 units_imperial:0=METRIC 1=IMPERIAL
         - label: { x: 38, y: 425, text: "UNIT", text_font: font_small, text_color: 0x9AE6B4 }

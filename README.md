@@ -90,6 +90,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 - **Tap the clock to set alarms and the timezone.** The clock defaults to Taipei time; pick
   yours under **TIMEZONE** on that page (also in the web UI as *Timezone*), or choose
   **AUTO (BY LOCATION)** to follow your coordinates, daylight saving included.
+- **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
+  *Radar Sweep*) to stop the rotating sweep; aircraft stay on screen at steady brightness.
 - **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
 - **Screenshots** — three-finger swipe saves a BMP, downloadable over HTTP and, on the P4,
   written to microSD.
@@ -157,6 +159,8 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
 - **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
 - **點時鐘可設定鬧鐘與時區** —— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
   (網頁介面的 *Timezone* 也能改),或選 **AUTO (BY LOCATION)** 依座標自動判斷(含日光節約)。
+- **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
+  即可停掉旋轉掃描線;航班照常顯示,亮度固定。
 - **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
 - **截圖** —— 三指滑動存成 BMP,可經 HTTP 下載;P4 還會另存一份到 microSD。
 - **全部在觸控螢幕上設定** —— Wi-Fi 走 captive portal,其餘都在面板上完成。設定存進 NVS、
@@ -221,6 +225,8 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 - **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
 - **点时钟可设定闹钟与时区** —— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
   (网页界面的 *Timezone* 也能改),或选 **AUTO (BY LOCATION)** 按坐标自动判断(含夏令时)。
+- **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
+  即可停掉旋转扫描线;航班照常显示,亮度固定。
 - **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
 - **截图** —— 三指滑动存成 BMP,可经 HTTP 下载;P4 还会另存一份到 microSD。
 - **全部在触摸屏上设定** —— Wi-Fi 走 captive portal,其余都在面板上完成。设定存进 NVS、
@@ -289,6 +295,18 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 Please respect each provider's free-tier terms; this is a hobby build, not a service.
 請遵守各來源的免費方案條款;這是業餘作品,不是服務。
 请遵守各来源的免费方案条款;这是业余作品,不是服务。
+
+## ☕ Support / 贊助 / 赞助
+
+If you enjoy this project, you can buy me a coffee — though what I love most is your ⭐ **Star**!
+
+喜歡這個專案的話,可以請我喝杯咖啡 —— 不過我最喜歡的,還是你的 ⭐ **Star**!
+
+喜欢这个项目的话,可以请我喝杯咖啡 —— 不过我最喜欢的,还是你的 ⭐ **Star**!
+
+[![Buy me a coffee on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/delphicchen)
+
+---
 
 ## 🔗 Links / 友链
 
