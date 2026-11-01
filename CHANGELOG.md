@@ -3,7 +3,10 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.3.11] — 2026-11-01
+
+Prebuilt images for every S3 board (Touch-LCD-7 and 7B as beta). Boards that were still on
+v1.3.9 also pick up v1.3.10's timezone AUTO, US timezones and ECHO fix.
 
 ### Added
 
