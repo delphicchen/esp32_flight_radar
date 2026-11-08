@@ -3,7 +3,9 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.4.2] — 2026-11-08
+
+Prebuilt image for the P4 (`v1.4.2-p4`). The S3 boards get the same features as v1.3.12.
 
 ### Added
 

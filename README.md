@@ -86,12 +86,15 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
   **AUTO (BY LOCATION)** to follow your coordinates, daylight saving included.
 - **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
   *Radar Sweep*) to stop the rotating sweep; aircraft stay on screen at steady brightness.
-- **Flight strip list** — tap the ▲ handle on the right-panel divider to fold the controls
-  away (the clock shrinks to the top-left) and show ATC-style flight strips sorted by distance: callsign,
-  type, flight level, climb/descent, ground speed and distance, 6 per page (◀ ▶ to page).
-  Tapping a strip selects that aircraft, and tapping an aircraft on the radar highlights its
-  strip. The selected aircraft also draws its full track since it entered the screen (lost on
-  reboot; one point per poll). Tap ▼ to bring the controls back; the mode survives a reboot.
+- **Flight strip list — tap the ▲ arrow** in the middle of the right panel (on the line
+  under the MAP/ECHO/ATC buttons). The controls fold away, the clock shrinks to the top-left,
+  and the whole right column shows ATC-style flight strips sorted by distance: callsign, type,
+  flight level, climb/descent, ground speed and distance, 6 per page (◀ ▶ to page). Tap a strip
+  to select that aircraft, or tap an aircraft on the radar to find its strip. The selected strip
+  is outlined and the aircraft draws its full track since it entered the screen in white (lost
+  on reboot; one point per poll). Tap **▼** to bring the controls back; the mode survives a reboot.
+
+  ![Flight strip list with a selected aircraft and its track](docs/flight_strips.png)
 - **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
 - **Screenshots** — three-finger swipe saves a BMP, downloadable over HTTP and, on the P4,
   written to microSD.
@@ -159,10 +162,13 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   (網頁介面的 *Timezone* 也能改),或選 **AUTO (BY LOCATION)** 依座標自動判斷(含日光節約)。
 - **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
   即可停掉旋轉掃描線;航班照常顯示,亮度固定。
-- **航班 strip 列表** —— 點右欄分隔線上的 ▲ 把手,控制項會收起(時鐘縮小到左上角),下方改顯示依距離
-  排序的航管式 flight strip:呼號、機型、飛行高度、爬升/下降、地速、距離,每頁 6 架(◀ ▶ 翻頁)。
-  點 strip 即選中該航班,在雷達上點飛機也會讓對應的 strip 反白;選中的航班會畫出進入畫面以來的
-  完整航跡(重開機清空,每次抓取記一點)。點 ▼ 放回控制項;模式重開機後沿用。
+- **航班 strip 列表 —— 點右欄中間的 ▲ 箭頭**(MAP/ECHO/ATC 按鈕下方那條線上)。控制項會收起、
+  時鐘縮小到左上角,整個右欄改顯示依距離排序的航管式 flight strip:呼號、機型、飛行高度、
+  爬升/下降、地速、距離,每頁 6 架(◀ ▶ 翻頁)。點 strip 即選中該航班,在雷達上點飛機也會
+  找到對應的 strip;選中的 strip 會加框,並以白線畫出該航班進入畫面以來的完整航跡(重開機清空,
+  每次抓取記一點)。點 **▼** 放回控制項;模式重開機後沿用。
+
+  ![航班 strip 列表:選中航班與其航跡](docs/flight_strips.png)
 - **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
 - **截圖** —— 三指滑動存成 BMP,可經 HTTP 下載;P4 還會另存一份到 microSD。
 - **全部在觸控螢幕上設定** —— Wi-Fi 走 captive portal,其餘都在面板上完成。設定存進 NVS、
@@ -227,10 +233,13 @@ ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
   (网页界面的 *Timezone* 也能改),或选 **AUTO (BY LOCATION)** 按坐标自动判断(含夏令时)。
 - **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
   即可停掉旋转扫描线;航班照常显示,亮度固定。
-- **航班 strip 列表** —— 点右栏分隔线上的 ▲ 把手,控件会收起(时钟缩小到左上角),下方改显示按距离
-  排序的航管式 flight strip:呼号、机型、飞行高度、爬升/下降、地速、距离,每页 6 架(◀ ▶ 翻页)。
-  点 strip 即选中该航班,在雷达上点飞机也会让对应的 strip 高亮;选中的航班会画出进入画面以来的
-  完整航迹(重启清空,每次抓取记一点)。点 ▼ 放回控件;模式重启后沿用。
+- **航班 strip 列表 —— 点右栏中间的 ▲ 箭头**(MAP/ECHO/ATC 按钮下方那条线上)。控件会收起、
+  时钟缩小到左上角,整个右栏改显示按距离排序的航管式 flight strip:呼号、机型、飞行高度、
+  爬升/下降、地速、距离,每页 6 架(◀ ▶ 翻页)。点 strip 即选中该航班,在雷达上点飞机也会
+  找到对应的 strip;选中的 strip 会加框,并以白线画出该航班进入画面以来的完整航迹(重启清空,
+  每次抓取记一点)。点 **▼** 放回控件;模式重启后沿用。
+
+  ![航班 strip 列表:选中航班与其航迹](docs/flight_strips.png)
 - **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
 - **截图** —— 三指滑动存成 BMP,可经 HTTP 下载;P4 还会另存一份到 microSD。
 - **全部在触摸屏上设定** —— Wi-Fi 走 captive portal,其余都在面板上完成。设定存进 NVS、
