@@ -189,7 +189,10 @@ time:
           - lvgl.label.update:
               id: clock_label
               text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
-      - seconds: 0            # 每分鐘檢查鬧鐘
+          - lvgl.label.update:      # #22 列表模式的小時鐘(藏著時更新也只是改字串)
+              id: list_clock_l
+              text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
+      - seconds: 0           # 每分鐘檢查鬧鐘
         then:
           - lambda: |-
               auto t = id(rtc_time).now();
@@ -639,8 +642,10 @@ script:
             if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
             else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
           }
-          // 把手:收合時在分隔線上(▲=把控制項往上收),展開時移到時鐘下方(▼=放回控制項)
-          lv_obj_set_y((lv_obj_t *) id(list_handle), on ? RS(96) : RS(186));
+          // 把手固定在分隔線上:▲=把控制項收起、▼=放回控制項
+          // 大時鐘藏起來,改用左上角的小時鐘(on_time 每秒兩個都更新)
+          if (on) { lv_obj_add_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_clear_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
+          else    { lv_obj_clear_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
           lv_label_set_text(id(list_handle_l), on ? LV_SYMBOL_DOWN : LV_SYMBOL_UP);
       - script.execute: atc_panel_sync
       - script.execute: strips_update
@@ -650,12 +655,12 @@ script:
     then:
       - lambda: |-
           if (!id(list_on)) return;
-          const int ROWS = 6;
-          lv_obj_t *box[ROWS] = { id(st0), id(st1), id(st2), id(st3), id(st4), id(st5) };
-          lv_obj_t *bar[ROWS] = { id(st0_bar), id(st1_bar), id(st2_bar), id(st3_bar), id(st4_bar), id(st5_bar) };
-          lv_obj_t *la[ROWS] = { id(st0_a), id(st1_a), id(st2_a), id(st3_a), id(st4_a), id(st5_a) };
-          lv_obj_t *lb[ROWS] = { id(st0_b), id(st1_b), id(st2_b), id(st3_b), id(st4_b), id(st5_b) };
-          lv_obj_t *lc[ROWS] = { id(st0_c), id(st1_c), id(st2_c), id(st3_c), id(st4_c), id(st5_c) };
+          const int ROWS = 4;   // strip_box 在分隔線下方(高 234):3×50 + 選中展開 68 = 218
+          lv_obj_t *box[ROWS] = { id(st0), id(st1), id(st2), id(st3) };
+          lv_obj_t *bar[ROWS] = { id(st0_bar), id(st1_bar), id(st2_bar), id(st3_bar) };
+          lv_obj_t *la[ROWS] = { id(st0_a), id(st1_a), id(st2_a), id(st3_a) };
+          lv_obj_t *lb[ROWS] = { id(st0_b), id(st1_b), id(st2_b), id(st3_b) };
+          lv_obj_t *lc[ROWS] = { id(st0_c), id(st1_c), id(st2_c), id(st3_c) };
           auto set_txt = [](lv_obj_t *l, const char *t) {   // 文字沒變就不重設,省重繪
             if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
           };
