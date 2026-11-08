@@ -736,16 +736,16 @@ script:
             lv_obj_set_height(box[r], h);
             lv_obj_set_height(bar[r], h);
             y += h + RS(4);
-            // 配色:選中=琥珀色細框 + 呼號行琥珀色(與雷達上選中飛機的 0xFFD24A 同色),底色不反白;
-            // 左側色條=STCA 紅 / 爬升亮綠 / 下降琥珀 / 平飛綠(選中時照常顯示)
-            lv_obj_set_style_bg_color(box[r], lv_color_hex(is_sel ? 0x10281A : 0x0A1F12), 0);
-            lv_obj_set_style_border_color(box[r], lv_color_hex(is_sel ? 0xFFD24A : 0x003820), 0);
-            lv_obj_set_style_border_width(box[r], is_sel ? 2 : 1, 0);
-            lv_obj_set_style_text_color(la[r], lv_color_hex(is_sel ? 0xFFD24A : 0xD2E6D7), 0);
-            lv_obj_set_style_text_color(lb[r], lv_color_hex(0xD2E6D7), 0);
-            lv_obj_set_style_text_color(lc[r], lv_color_hex(0x9AB8A2), 0);
+            // 配色:左側色條=STCA 紅 / 爬升亮綠 / 下降琥珀 / 平飛綠;
+            // 選中=外框改成與色條同色(2px)+ 呼號行白色,底色不反白
             uint32_t bc = cfl[i] ? 0xFF3030 : (trend == '^' ? 0x00FF41 : (trend == 'v' ? 0xE8A020 : 0x00A050));
             lv_obj_set_style_bg_color(bar[r], lv_color_hex(bc), 0);
+            lv_obj_set_style_bg_color(box[r], lv_color_hex(is_sel ? 0x10281A : 0x0A1F12), 0);
+            lv_obj_set_style_border_color(box[r], lv_color_hex(is_sel ? bc : 0x003820), 0);
+            lv_obj_set_style_border_width(box[r], is_sel ? 2 : 1, 0);
+            lv_obj_set_style_text_color(la[r], lv_color_hex(is_sel ? 0xFFFFFF : 0xD2E6D7), 0);
+            lv_obj_set_style_text_color(lb[r], lv_color_hex(0xD2E6D7), 0);
+            lv_obj_set_style_text_color(lc[r], lv_color_hex(0x9AB8A2), 0);
             lv_obj_clear_flag(box[r], LV_OBJ_FLAG_HIDDEN);
           }
           if (cnt > 0) snprintf(b, sizeof(b), "%d/%d", id(list_page) + 1, pages);

@@ -40,8 +40,8 @@ lvgl:
         - line:
             id: sel_track
             points: ["0, 0", "0, 0"]
-            line_color: 0xFFD24A   # 與選中飛機、選中 strip 同色
-            line_width: 2
+            line_color: 0xFFFFFF   # 亮白,在綠色雷達底圖上最醒目
+            line_width: 3
             opa: 90%
             hidden: true
         # 航班標記 ×10:飛機圖示(依航向旋轉)+ ATC 資料標籤,可點選
