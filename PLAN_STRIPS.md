@@ -44,7 +44,7 @@
 - [ ] 2–4 800×480 實機確認
 - [x] 5. 重新產生 1024×600(只有新增、sweep_btn y526 已補回),6 個 S3 設定全部編譯通過
 - [ ] 5. 1024×600 實機確認
-- [ ] 6. 移植 lvgl9
+- [x] 6. 移植 lvgl9(分支 strips-lvgl9,lv_point_precise_t),P4 編譯通過
 - [x] 7. 第二階段:完整航跡(track_hist.h + sel_track),S3-7 與 S3-7B 編譯通過
 - [ ] 7. 實機確認(航跡對齊、換範圍、長時間 PSRAM)
 - [x] 文件:README 三節、CHANGELOG [Unreleased]
