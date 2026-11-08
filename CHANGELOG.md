@@ -3,7 +3,10 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
-## [Unreleased]
+## [v1.3.12] — 2026-11-08
+
+Prebuilt images for all six S3 boards, including the Touch-LCD-7 and 7B, which leave their
+v1.3.9 betas behind. The P4 gets the same features as v1.4.2-p4.
 
 ### Added
 
