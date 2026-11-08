@@ -5488,7 +5488,7 @@ lvgl:
         - button:
             id: list_prev
             x: 618
-            y: 120
+            y: 233
             width: 55
             height: 25
             radius: 5
@@ -5510,7 +5510,7 @@ lvgl:
         - button:
             id: list_next
             x: 935
-            y: 120
+            y: 233
             width: 55
             height: 25
             radius: 5
@@ -5532,20 +5532,30 @@ lvgl:
         - label:
             id: list_page_l
             x: 680
-            y: 119
+            y: 231
             width: 70
             text: ""
             text_align: CENTER
             text_font: font_small
             text_color: 0x6E8273
             hidden: true
+        # 列表模式的小時鐘(大時鐘 clock_label 藏起來,這行取代它)
+        - label:
+            id: list_clock_l
+            x: 625
+            y: 15
+            text: "--:--:--"
+            text_font: font_mid
+            text_color: 0x00C060
+            hidden: true
         - obj:
             id: strip_box
             x: 613
-            y: 150
+            y: 263
             width: 378
-            height: 400
-            bg_opa: TRANSP
+            height: 293
+            bg_color: 0x040C08
+            bg_opa: COVER        # 不透明:列表模式靠它蓋住下方的 sel_* 選機資訊
             border_width: 0
             pad_all: 0
             radius: 0
@@ -5772,116 +5782,6 @@ lvgl:
                   on_click:
                     - lambda: |-
                         int i = id(strip_map).size() > 3 ? id(strip_map)[3] : -1;
-                        if (i >= 0) id(select_index).execute(i);
-              - obj:
-                  id: st4
-                  x: 0
-                  y: 250
-                  width: 378
-                  height: 58
-                  radius: 3
-                  bg_color: 0x0A1F12
-                  bg_opa: COVER
-                  border_width: 1
-                  border_color: 0x003820
-                  pad_all: 0
-                  clickable: true
-                  scrollable: false
-                  scrollbar_mode: "OFF"
-                  hidden: true
-                  widgets:
-                    - obj:
-                        id: st4_bar
-                        x: 0
-                        y: 0
-                        width: 5
-                        height: 58
-                        radius: 0
-                        bg_color: 0x00C060
-                        bg_opa: COVER
-                        border_width: 0
-                        pad_all: 0
-                        clickable: false
-                    - label:
-                        id: st4_a
-                        x: 13
-                        y: 1
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                    - label:
-                        id: st4_b
-                        x: 13
-                        y: 29
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                    - label:
-                        id: st4_c
-                        x: 13
-                        y: 56
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                        hidden: true
-                  on_click:
-                    - lambda: |-
-                        int i = id(strip_map).size() > 4 ? id(strip_map)[4] : -1;
-                        if (i >= 0) id(select_index).execute(i);
-              - obj:
-                  id: st5
-                  x: 0
-                  y: 313
-                  width: 378
-                  height: 58
-                  radius: 3
-                  bg_color: 0x0A1F12
-                  bg_opa: COVER
-                  border_width: 1
-                  border_color: 0x003820
-                  pad_all: 0
-                  clickable: true
-                  scrollable: false
-                  scrollbar_mode: "OFF"
-                  hidden: true
-                  widgets:
-                    - obj:
-                        id: st5_bar
-                        x: 0
-                        y: 0
-                        width: 5
-                        height: 58
-                        radius: 0
-                        bg_color: 0x00C060
-                        bg_opa: COVER
-                        border_width: 0
-                        pad_all: 0
-                        clickable: false
-                    - label:
-                        id: st5_a
-                        x: 13
-                        y: 1
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                    - label:
-                        id: st5_b
-                        x: 13
-                        y: 29
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                    - label:
-                        id: st5_c
-                        x: 13
-                        y: 56
-                        text: ""
-                        text_font: font_mono
-                        text_color: 0xD2E6D7
-                        hidden: true
-                  on_click:
-                    - lambda: |-
-                        int i = id(strip_map).size() > 5 ? id(strip_map)[5] : -1;
                         if (i >= 0) id(select_index).execute(i);
 
         # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
