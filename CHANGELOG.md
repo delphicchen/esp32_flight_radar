@@ -8,7 +8,7 @@ out first, because that is the part that costs you time.
 ### Added
 
 - **Flight strip list** (#22). A ▲ handle on the right-panel divider folds the controls away
-  (the clock stays) and shows ATC-style flight strips sorted by distance from home: callsign,
+  (the clock shrinks to the top-left) and shows, below the divider, ATC-style flight strips sorted by distance from home: callsign,
   type, flight level, climb/descent, ground speed and distance, 4 per page with ◀ ▶ paging.
   Selection works both ways: tapping a strip selects the aircraft, and selecting one on the
   radar highlights its strip (pinned to the top if it is on another page). The selected strip
