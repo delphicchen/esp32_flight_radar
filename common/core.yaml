@@ -113,6 +113,7 @@ esphome:
           lv_dropdown_set_selected(id(unit_dd)->obj, id(units_imperial) ? 1 : 0);
       - script.execute: atc_panel_sync
       - script.execute: sweep_apply
+      - script.execute: list_apply   # #22:list_on 自 NVS 還原,開機就回到上次的右欄模式
       - lambda: |-
           #if !RADAR_BL_PWM
           // 背光無 PWM(CH422G 擴充腳,只能開/關)→ 用 LVGL top layer 的全螢幕
@@ -484,6 +485,11 @@ globals:
   - { id: trail_cs,  type: 'std::vector<std::string>' }   # 各軌跡槽目前記錄的呼號(換機時作廢舊歷史)
   - { id: conflict_slot, type: 'std::vector<uint8_t>' }   # 各槽是否觸發 STCA 衝突告警
   - { id: lbl_side, type: 'std::vector<uint8_t>' }        # 各槽標籤位置 0=右 1=左(避開向量線)
+  # #22 航班 strip 列表
+  - { id: list_on, type: bool, restore_value: true, initial_value: 'false' }   # 右欄是否為列表模式(重開機沿用)
+  - { id: list_page, type: int, initial_value: '0' }                           # 目前頁數(超出範圍時 strips_update 會繞回)
+  - { id: strip_map, type: 'std::vector<int>' }                                 # 各 strip 對應的資料索引,-1=空
+  - { id: sel_route_g, type: std::string }                                      # 選中航班的起訖站(給 strip 第 3 行)
   - { id: al0, type: uint32_t, restore_value: true, initial_value: '0' }
   - { id: al1, type: uint32_t, restore_value: true, initial_value: '0' }
   - { id: al2, type: uint32_t, restore_value: true, initial_value: '0' }
@@ -548,6 +554,14 @@ script:
             i = id(slot_map)[slot];
           }
           if (i < 0 || i >= (int) id(ac_cs).size()) return;
+          id(select_index).execute(i);
+
+  - id: select_index           # 依資料索引選機/取消選取(雷達點選與 strip 列表共用)
+    parameters:
+      i: int
+    then:
+      - lambda: |-
+          if (i < 0 || i >= (int) id(ac_cs).size()) return;
           id(spec_on) = false;   // 換機/取消選取都回到航班資訊(規格是上一台的)
           if (id(info_on)) {   // 點選飛機 → 退出系統資訊顯示
             id(info_on) = false;
@@ -561,6 +575,7 @@ script:
             return;
           }
           id(sel_cs_g) = id(ac_cs)[i];
+          id(sel_route_g).clear();
           lv_label_set_text(id(sel_cs_l), id(ac_cs)[i].c_str());
           lv_label_set_text(id(sel_route_l), "ROUTE ...");
           float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
@@ -592,6 +607,140 @@ script:
               i < (int) id(ac_ty).size() ? id(ac_ty)[i].c_str() : "");
       - script.execute: fetch_route
       - script.execute: atc_panel_sync   # 選機→藏圖層面板;取消選取→ATC 模式下重新顯示
+      - lambda: 'if (id(list_on)) id(strips_update).execute();'   # strip 反白立即跟上
+
+  - id: list_apply             # #22 把手:切換右欄「控制項 ↔ strip 列表」
+    mode: single
+    then:
+      - lambda: |-
+          bool on = id(list_on);
+          if (on && id(info_on)) {   // 進列表 → 退出系統資訊(按鈕會被藏起來,否則關不掉)
+            id(info_on) = false;
+            lv_obj_clear_state((lv_obj_t *) id(info_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(info_btn_l), lv_color_hex(0x00C060), 0);
+            if (id(sel_cs_g).empty()) id(show_weather).execute();
+          }
+          // 選機區(sel_*)不必逐一藏:strip_box 不透明且疊在上層,直接蓋住
+          lv_obj_t *ctl[] = {
+            id(coords_label),
+            (lv_obj_t *) id(map_btn), (lv_obj_t *) id(echo_btn), (lv_obj_t *) id(atc_btn),
+            (lv_obj_t *) id(pwr_btn), (lv_obj_t *) id(info_btn),
+          };
+          for (auto *o : ctl) {
+            if (on) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            else    lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+          }
+          lv_obj_t *lst[] = {
+            (lv_obj_t *) id(strip_box), (lv_obj_t *) id(list_prev),
+            (lv_obj_t *) id(list_next), id(list_page_l),
+          };
+          for (auto *o : lst) {
+            if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+            else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+          }
+          // 把手:收合時在分隔線上(▲=把控制項往上收),展開時移到時鐘下方(▼=放回控制項)
+          lv_obj_set_y((lv_obj_t *) id(list_handle), on ? RS(96) : RS(186));
+          lv_label_set_text(id(list_handle_l), on ? LV_SYMBOL_DOWN : LV_SYMBOL_UP);
+      - script.execute: atc_panel_sync
+      - script.execute: strips_update
+
+  - id: strips_update          # #22 依距離排序填入 strip;只在列表模式下有作用
+    mode: single
+    then:
+      - lambda: |-
+          if (!id(list_on)) return;
+          const int ROWS = 6;
+          lv_obj_t *box[ROWS] = { id(st0), id(st1), id(st2), id(st3), id(st4), id(st5) };
+          lv_obj_t *bar[ROWS] = { id(st0_bar), id(st1_bar), id(st2_bar), id(st3_bar), id(st4_bar), id(st5_bar) };
+          lv_obj_t *la[ROWS] = { id(st0_a), id(st1_a), id(st2_a), id(st3_a), id(st4_a), id(st5_a) };
+          lv_obj_t *lb[ROWS] = { id(st0_b), id(st1_b), id(st2_b), id(st3_b), id(st4_b), id(st5_b) };
+          lv_obj_t *lc[ROWS] = { id(st0_c), id(st1_c), id(st2_c), id(st3_c), id(st4_c), id(st5_c) };
+          auto set_txt = [](lv_obj_t *l, const char *t) {   // 文字沒變就不重設,省重繪
+            if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
+          };
+          // 雷達圈內的航機,依與 home 的距離由近到遠
+          float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+          float rng = id(radar_range).state;
+          float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+          int n = (int) id(ac_lat).size();
+          std::vector<std::pair<float, int>> v;
+          v.reserve(n);
+          int sel = -1;
+          for (int k = 0; k < n; k++) {
+            float e  = (id(ac_lon)[k] - lon0) * 111.320f * coslat;
+            float no = (id(ac_lat)[k] - lat0) * 110.574f;
+            float d = sqrtf(e * e + no * no);
+            if (d > rng) continue;
+            v.push_back({d, k});
+          }
+          std::sort(v.begin(), v.end());
+          int cnt = (int) v.size();
+          int pos = -1;   // 選中航班在排序後的位置
+          for (int k = 0; k < cnt; k++)
+            if (!id(sel_cs_g).empty() && id(ac_cs)[v[k].second] == id(sel_cs_g)) { pos = k; sel = v[k].second; break; }
+          int pages = cnt > 0 ? (cnt + ROWS - 1) / ROWS : 1;
+          if (id(list_page) < 0) id(list_page) = pages - 1;   // 翻頁繞回
+          if (id(list_page) >= pages) id(list_page) = 0;
+          int start = id(list_page) * ROWS;
+          // 本頁要顯示的資料索引;選中的航班不在本頁時釘在第一條
+          std::vector<std::pair<float, int>> rows;
+          if (pos >= 0 && (pos < start || pos >= start + ROWS)) rows.push_back(v[pos]);
+          for (int k = start; k < cnt && (int) rows.size() < ROWS; k++) rows.push_back(v[k]);
+          // STCA 旗標是依顯示槽記的,換算回資料索引
+          std::vector<uint8_t> cfl(n, 0);
+          for (size_t s = 0; s < id(slot_map).size() && s < id(conflict_slot).size(); s++) {
+            int di = id(slot_map)[s];
+            if (id(conflict_slot)[s] && di >= 0 && di < n) cfl[di] = 1;
+          }
+          id(strip_map).assign(ROWS, -1);
+          bool imp = id(units_imperial);
+          int y = 0;
+          char b[48];
+          for (int r = 0; r < ROWS; r++) {
+            if (r >= (int) rows.size()) { lv_obj_add_flag(box[r], LV_OBJ_FLAG_HIDDEN); continue; }
+            int i = rows[r].second;
+            float d = rows[r].first;
+            id(strip_map)[r] = i;
+            bool is_sel = (i == sel);
+            // 第 1 行:呼號 + 機型
+            const char *ty = (i < (int) id(ac_ty).size() && !id(ac_ty)[i].empty()) ? id(ac_ty)[i].c_str() : "----";
+            snprintf(b, sizeof(b), "%-9s%s", id(ac_cs)[i].c_str(), ty);
+            set_txt(la[r], b);
+            // 第 2 行:飛行高度(FL)+ 爬升/下降 + 地速(kt)+ 距離
+            float alt = id(ac_alt)[i];
+            float vr = i < (int) id(ac_vr).size() ? id(ac_vr)[i] : 0.0f;
+            char trend = vr > 1.5f ? '^' : (vr < -1.5f ? 'v' : ' ');
+            char altb[12];
+            if (alt < 30.0f) snprintf(altb, sizeof(altb), "GND  ");
+            else             snprintf(altb, sizeof(altb), "FL%03.0f", alt * 0.032808f);
+            snprintf(b, sizeof(b), "%s %c %4.0fkt %5.1f%s", altb, trend, id(ac_vel)[i] * 1.9438f,
+                     d * (imp ? 0.6214f : 1.0f), imp ? "mi" : "km");
+            set_txt(lb[r], b);
+            // 第 3 行:只有選中的才展開,顯示起訖站
+            if (is_sel) {
+              set_txt(lc[r], id(sel_route_g).empty() ? "ROUTE ..." : id(sel_route_g).c_str());
+              lv_obj_clear_flag(lc[r], LV_OBJ_FLAG_HIDDEN);
+            } else {
+              lv_obj_add_flag(lc[r], LV_OBJ_FLAG_HIDDEN);
+            }
+            int h = is_sel ? RS(68) : RS(46);
+            lv_obj_set_y(box[r], y);
+            lv_obj_set_height(box[r], h);
+            lv_obj_set_height(bar[r], h);
+            y += h + RS(4);
+            // 配色:選中=反白;左側色條=STCA 紅 / 爬升亮綠 / 下降琥珀 / 平飛綠
+            lv_obj_set_style_bg_color(box[r], lv_color_hex(is_sel ? 0x00C060 : 0x0A1F12), 0);
+            uint32_t tc = is_sel ? 0x04180C : 0xD2E6D7;
+            lv_obj_set_style_text_color(la[r], lv_color_hex(tc), 0);
+            lv_obj_set_style_text_color(lb[r], lv_color_hex(tc), 0);
+            lv_obj_set_style_text_color(lc[r], lv_color_hex(tc), 0);
+            uint32_t bc = cfl[i] ? 0xFF3030 : (trend == '^' ? 0x00FF41 : (trend == 'v' ? 0xE8A020 : 0x00A050));
+            lv_obj_set_style_bg_color(bar[r], lv_color_hex(is_sel && !cfl[i] ? 0x04180C : bc), 0);
+            lv_obj_clear_flag(box[r], LV_OBJ_FLAG_HIDDEN);
+          }
+          if (cnt > 0) snprintf(b, sizeof(b), "%d/%d", id(list_page) + 1, pages);
+          else         snprintf(b, sizeof(b), "--");
+          set_txt(id(list_page_l), b);
 
   - id: toggle_spec            # 機型徽章當按鈕:輪廓+規格 ↔ 航班資訊
     mode: single
@@ -731,6 +880,14 @@ script:
           } else {
             lv_obj_add_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
           }
+          // #22 列表模式:三個覆蓋層一律收起;SYS 開著時藏把手(分頁列會壓到它)
+          if (id(list_on)) {
+            lv_obj_add_flag(id(atc_panel), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(spec_panel), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(sys_tabbar), LV_OBJ_FLAG_HIDDEN);
+          }
+          if (tab_mode) lv_obj_add_flag((lv_obj_t *) id(list_handle), LV_OBJ_FLAG_HIDDEN);
+          else          lv_obj_clear_flag((lv_obj_t *) id(list_handle), LV_OBJ_FLAG_HIDDEN);
       - if:
           condition:
             lambda: 'return id(info_on);'
@@ -939,6 +1096,8 @@ interval:
       - lambda: |-
           // i 鈕開啟中 → 每秒刷新系統資訊(RAM/PSRAM/運行時間會變)
           if (id(info_on)) id(show_sysinfo).execute();
+          // #22 列表模式 → 每秒重排 strip(距離、高度會變)
+          if (id(list_on)) id(strips_update).execute();
           // 工具列每秒置頂一次:航班 mark 顯隱/set_pos 後偶發搶上層,SYS 就點不到
           {
             lv_obj_t *tb[] = {
@@ -1052,6 +1211,7 @@ interval:
           if (radar_bg::g_route_ready) {
             xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
             radar_bg::g_route_ready = false;
+            id(sel_route_g) = radar_bg::g_route;   // #22 選中 strip 的第 3 行用
             if (!id(info_on))
               lv_label_set_text(id(sel_route_l), radar_bg::g_route.c_str());
             xSemaphoreGive(radar_bg::mtx());
