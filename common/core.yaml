@@ -642,7 +642,8 @@ script:
             if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
             else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
           }
-          // 把手固定在分隔線上:▲=把控制項收起、▼=放回控制項
+          // 把手:收合時在分隔線上(▲=把控制項收起),展開時移到小時鐘下方的翻頁列(▼=放回控制項)
+          lv_obj_set_y((lv_obj_t *) id(list_handle), on ? RS(52) : RS(186));
           // 大時鐘藏起來,改用左上角的小時鐘(on_time 每秒兩個都更新)
           if (on) { lv_obj_add_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_clear_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
           else    { lv_obj_clear_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
@@ -655,12 +656,12 @@ script:
     then:
       - lambda: |-
           if (!id(list_on)) return;
-          const int ROWS = 4;   // strip_box 在分隔線下方(高 234):3×50 + 選中展開 68 = 218
-          lv_obj_t *box[ROWS] = { id(st0), id(st1), id(st2), id(st3) };
-          lv_obj_t *bar[ROWS] = { id(st0_bar), id(st1_bar), id(st2_bar), id(st3_bar) };
-          lv_obj_t *la[ROWS] = { id(st0_a), id(st1_a), id(st2_a), id(st3_a) };
-          lv_obj_t *lb[ROWS] = { id(st0_b), id(st1_b), id(st2_b), id(st3_b) };
-          lv_obj_t *lc[ROWS] = { id(st0_c), id(st1_c), id(st2_c), id(st3_c) };
+          const int ROWS = 6;   // strip_box 在小時鐘下方(高 364):5×50 + 選中展開 68 = 318
+          lv_obj_t *box[ROWS] = { id(st0), id(st1), id(st2), id(st3), id(st4), id(st5) };
+          lv_obj_t *bar[ROWS] = { id(st0_bar), id(st1_bar), id(st2_bar), id(st3_bar), id(st4_bar), id(st5_bar) };
+          lv_obj_t *la[ROWS] = { id(st0_a), id(st1_a), id(st2_a), id(st3_a), id(st4_a), id(st5_a) };
+          lv_obj_t *lb[ROWS] = { id(st0_b), id(st1_b), id(st2_b), id(st3_b), id(st4_b), id(st5_b) };
+          lv_obj_t *lc[ROWS] = { id(st0_c), id(st1_c), id(st2_c), id(st3_c), id(st4_c), id(st5_c) };
           auto set_txt = [](lv_obj_t *l, const char *t) {   // 文字沒變就不重設,省重繪
             if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
           };
@@ -717,7 +718,8 @@ script:
             float vr = i < (int) id(ac_vr).size() ? id(ac_vr)[i] : 0.0f;
             char trend = vr > 1.5f ? '^' : (vr < -1.5f ? 'v' : ' ');
             char altb[12];
-            if (alt < 30.0f) snprintf(altb, sizeof(altb), "GND  ");
+            // 高度 0 但速度快(> 50 m/s ≈ 100kt)= 資料源沒給高度,不是在地面
+            if (alt < 30.0f) snprintf(altb, sizeof(altb), id(ac_vel)[i] > 50.0f ? "FL---" : "GND  ");
             else             snprintf(altb, sizeof(altb), "FL%03.0f", alt * 0.032808f);
             snprintf(b, sizeof(b), "%s %c %4.0fkt %5.1f%s", altb, trend, id(ac_vel)[i] * 1.9438f,
                      d * (imp ? 0.6214f : 1.0f), imp ? "mi" : "km");
