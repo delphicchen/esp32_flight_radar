@@ -36,6 +36,14 @@ lvgl:
             line_color: 0x00A050
             line_width: 2
             opa: 80%
+        # #22 選中航班的完整航跡(進入畫面以來);程式每秒更新點陣列,壓在航班標記之下
+        - line:
+            id: sel_track
+            points: ["0, 0", "0, 0"]
+            line_color: 0x00C060
+            line_width: 2
+            opa: 55%
+            hidden: true
         # 航班標記 ×10:飛機圖示(依航向旋轉)+ ATC 資料標籤,可點選
         - obj:
             id: ac0
