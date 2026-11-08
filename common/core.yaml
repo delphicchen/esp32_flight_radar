@@ -48,6 +48,7 @@ esphome:
     - tz_db.h              # 產生器:tools/make_tz_db.py(時區 AUTO 用的 IANA→POSIX 表)
     - radar_fetch.h
     - alarm.h
+    - track_hist.h         # #22 選中航班的完整航跡歷史
   on_boot:
     priority: -100
     then:
@@ -1348,6 +1349,7 @@ interval:
             id(ac_alt).push_back(ac.alt); id(ac_cs).push_back(ac.cs);
             id(ac_vr).push_back(ac.vr); id(ac_lc).push_back(ac.lc);
             id(ac_sq).push_back(ac.sq); id(ac_ty).push_back(ac.ty);
+            trk::add(ac.hex, ac.lat, ac.lon, millis());   // #22 完整航跡歷史
           }
           radar_bg::g_states_ready = false;
           xSemaphoreGive(radar_bg::mtx());
@@ -1671,6 +1673,48 @@ interval:
             for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[i][k], LV_OBJ_FLAG_HIDDEN);
             id(slot_map)[i] = -1;
             if (id(slot_angle).size() == AC_SLOTS) id(slot_angle)[i] = -1.0f;
+          }
+          // #22 第二階段:選中航班的完整航跡(進入畫面以來)。從目前外插位置往回走,
+          // 出了雷達圈就停(lv_line 不能斷段),再反轉成舊→新。點陣列必須 static:
+          // LVGL 的 lv_line_set_points 只存指標,不複製
+          {
+            static lv_point_precise_t tp[trk::PTS + 1];   // LVGL 9 的 line 點座標型別
+            lv_obj_t *ln = id(sel_track)->obj;
+            int si = -1;
+            if (!id(sel_cs_g).empty())
+              for (int k = 0; k < (int) id(ac_cs).size(); k++)
+                if (id(ac_cs)[k] == id(sel_cs_g)) { si = k; break; }
+            const trk::Track *t = (si >= 0 && si < (int) id(ac_hex).size()) ? trk::find(id(ac_hex)[si]) : nullptr;
+            int np = 0;
+            if (t && t->n > 0) {
+              float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
+              float rng = id(radar_range).state;
+              float coslat = cosf(lat0 * 3.14159265f / 180.0f);
+              float dt = (id(fetch_ms) > 0) ? (millis() - id(fetch_ms)) / 1000.0f : 0.0f;
+              if (dt > 180.0f) dt = 180.0f;
+              auto put = [&](float e, float no) -> bool {
+                if (e * e + no * no > rng * rng) return false;
+                tp[np].x = RS(240) + (int) (e / rng * (float) RADAR_R);
+                tp[np].y = RS(240) - (int) (no / rng * (float) RADAR_R);
+                np++;
+                return true;
+              };
+              // 目前位置(與飛機圖示同一套外插),讓航跡接到圖示上
+              float rad = id(ac_trk)[si] * 3.14159265f / 180.0f;
+              float vkm = id(ac_vel)[si] * dt / 1000.0f;
+              if (put((id(ac_lon)[si] - lon0) * 111.320f * coslat + vkm * sinf(rad),
+                      (id(ac_lat)[si] - lat0) * 110.574f + vkm * cosf(rad))) {
+                for (int k = t->n - 1; k >= 0; k--)
+                  if (!put((t->lon[k] - lon0) * 111.320f * coslat, (t->lat[k] - lat0) * 110.574f)) break;
+              }
+              for (int a = 0, b = np - 1; a < b; a++, b--) std::swap(tp[a], tp[b]);
+            }
+            if (np >= 2) {
+              lv_line_set_points(ln, tp, np);
+              lv_obj_clear_flag(ln, LV_OBJ_FLAG_HIDDEN);
+            } else {
+              lv_obj_add_flag(ln, LV_OBJ_FLAG_HIDDEN);
+            }
           }
   # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;6 秒轉一圈,角度用時間基準→不受幀率漂移)
   - interval: 30ms

@@ -86,6 +86,12 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
   **AUTO (BY LOCATION)** to follow your coordinates, daylight saving included.
 - **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
   *Radar Sweep*) to stop the rotating sweep; aircraft stay on screen at steady brightness.
+- **Flight strip list** — tap the ▲ handle on the right-panel divider to fold the controls
+  away (only the clock stays) and show ATC-style flight strips sorted by distance: callsign,
+  type, flight level, climb/descent, ground speed and distance, 6 per page (◀ ▶ to page).
+  Tapping a strip selects that aircraft, and tapping an aircraft on the radar highlights its
+  strip. The selected aircraft also draws its full track since it entered the screen (lost on
+  reboot; one point per poll). Tap ▼ to bring the controls back; the mode survives a reboot.
 - **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
 - **Screenshots** — three-finger swipe saves a BMP, downloadable over HTTP and, on the P4,
   written to microSD.
@@ -153,6 +159,10 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   (網頁介面的 *Timezone* 也能改),或選 **AUTO (BY LOCATION)** 依座標自動判斷(含日光節約)。
 - **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
   即可停掉旋轉掃描線;航班照常顯示,亮度固定。
+- **航班 strip 列表** —— 點右欄分隔線上的 ▲ 把手,控制項會收起(只留時鐘),改顯示依距離
+  排序的航管式 flight strip:呼號、機型、飛行高度、爬升/下降、地速、距離,每頁 6 架(◀ ▶ 翻頁)。
+  點 strip 即選中該航班,在雷達上點飛機也會讓對應的 strip 反白;選中的航班會畫出進入畫面以來的
+  完整航跡(重開機清空,每次抓取記一點)。點 ▼ 放回控制項;模式重開機後沿用。
 - **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
 - **截圖** —— 三指滑動存成 BMP,可經 HTTP 下載;P4 還會另存一份到 microSD。
 - **全部在觸控螢幕上設定** —— Wi-Fi 走 captive portal,其餘都在面板上完成。設定存進 NVS、
@@ -217,6 +227,10 @@ ESPHOME_BUILD_PATH=build9 esphome run radar-p4-7b.yaml
   (网页界面的 *Timezone* 也能改),或选 **AUTO (BY LOCATION)** 按坐标自动判断(含夏令时)。
 - **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
   即可停掉旋转扫描线;航班照常显示,亮度固定。
+- **航班 strip 列表** —— 点右栏分隔线上的 ▲ 把手,控件会收起(只留时钟),改显示按距离
+  排序的航管式 flight strip:呼号、机型、飞行高度、爬升/下降、地速、距离,每页 6 架(◀ ▶ 翻页)。
+  点 strip 即选中该航班,在雷达上点飞机也会让对应的 strip 高亮;选中的航班会画出进入画面以来的
+  完整航迹(重启清空,每次抓取记一点)。点 ▼ 放回控件;模式重启后沿用。
 - **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
 - **截图** —— 三指滑动存成 BMP,可经 HTTP 下载;P4 还会另存一份到 microSD。
 - **全部在触摸屏上设定** —— Wi-Fi 走 captive portal,其余都在面板上完成。设定存进 NVS、

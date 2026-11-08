@@ -3,6 +3,21 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Added
+
+- **Flight strip list** (#22). A ▲ handle on the right-panel divider folds the controls away
+  (the clock stays) and shows ATC-style flight strips sorted by distance from home: callsign,
+  type, flight level, climb/descent, ground speed and distance, 6 per page with ◀ ▶ paging.
+  Selection works both ways: tapping a strip selects the aircraft, and selecting one on the
+  radar highlights its strip (pinned to the top if it is on another page). The selected strip
+  expands to show the route. The mode is stored in NVS.
+- **Full track for the selected aircraft** (#22). Each aircraft's positions are kept from
+  the moment it appears (keyed by ICAO address, up to 128 points, thinned out when full, about
+  40 KB of PSRAM), and the selected one draws its whole on-screen track. History is not kept
+  across reboots, and points are one poll interval apart.
+
 ## [v1.4.1] — 2026-11-01
 
 P4 release. Brings the P4 level with the S3 boards: timezone AUTO, US timezones and the
