@@ -5454,6 +5454,427 @@ lvgl:
                     - lambda: 'id(sys_tab) = 1;'
                     - script.execute: atc_panel_sync
 
+        # ===== #22 航班 strip 列表:把手切換(收合=原本控制項,展開=只留時鐘+strip)=====
+        - button:
+            id: list_handle
+            x: 755
+            y: 233
+            width: 90
+            height: 25
+            radius: 5
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            pad_all: 0
+            widgets:
+              - label:
+                  id: list_handle_l
+                  align: CENTER
+                  text: "\uF077"
+                  text_font: montserrat_14
+                  text_color: 0x00C060
+            on_click:
+              - lambda: 'id(list_on) = !id(list_on);'
+              - script.execute: list_apply
+        - button:
+            id: list_prev
+            x: 618
+            y: 120
+            width: 55
+            height: 25
+            radius: 5
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            pad_all: 0
+            hidden: true
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF053"
+                  text_font: montserrat_14
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(list_page) += -1;
+                  id(strips_update).execute();
+        - button:
+            id: list_next
+            x: 935
+            y: 120
+            width: 55
+            height: 25
+            radius: 5
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            pad_all: 0
+            hidden: true
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF054"
+                  text_font: montserrat_14
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  id(list_page) += 1;
+                  id(strips_update).execute();
+        - label:
+            id: list_page_l
+            x: 680
+            y: 119
+            width: 70
+            text: ""
+            text_align: CENTER
+            text_font: font_small
+            text_color: 0x6E8273
+            hidden: true
+        - obj:
+            id: strip_box
+            x: 613
+            y: 150
+            width: 378
+            height: 400
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            radius: 0
+            scrollable: false
+            scrollbar_mode: "OFF"
+            hidden: true
+            widgets:
+              - obj:
+                  id: st0
+                  x: 0
+                  y: 0
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st0_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st0_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st0_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st0_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 0 ? id(strip_map)[0] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+              - obj:
+                  id: st1
+                  x: 0
+                  y: 63
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st1_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st1_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st1_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st1_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 1 ? id(strip_map)[1] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+              - obj:
+                  id: st2
+                  x: 0
+                  y: 125
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st2_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st2_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st2_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st2_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 2 ? id(strip_map)[2] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+              - obj:
+                  id: st3
+                  x: 0
+                  y: 188
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st3_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st3_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st3_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st3_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 3 ? id(strip_map)[3] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+              - obj:
+                  id: st4
+                  x: 0
+                  y: 250
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st4_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st4_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st4_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st4_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 4 ? id(strip_map)[4] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+              - obj:
+                  id: st5
+                  x: 0
+                  y: 313
+                  width: 378
+                  height: 58
+                  radius: 3
+                  bg_color: 0x0A1F12
+                  bg_opa: COVER
+                  border_width: 1
+                  border_color: 0x003820
+                  pad_all: 0
+                  clickable: true
+                  scrollable: false
+                  scrollbar_mode: "OFF"
+                  hidden: true
+                  widgets:
+                    - obj:
+                        id: st5_bar
+                        x: 0
+                        y: 0
+                        width: 5
+                        height: 58
+                        radius: 0
+                        bg_color: 0x00C060
+                        bg_opa: COVER
+                        border_width: 0
+                        pad_all: 0
+                        clickable: false
+                    - label:
+                        id: st5_a
+                        x: 13
+                        y: 1
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st5_b
+                        x: 13
+                        y: 29
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                    - label:
+                        id: st5_c
+                        x: 13
+                        y: 56
+                        text: ""
+                        text_font: font_mono
+                        text_color: 0xD2E6D7
+                        hidden: true
+                  on_click:
+                    - lambda: |-
+                        int i = id(strip_map).size() > 5 ? id(strip_map)[5] : -1;
+                        if (i >= 0) id(select_index).execute(i);
+
         # ===== 鬧鐘響鈴覆蓋層(預設隱藏,響時彈出)=====
         - obj:
             id: alarm_overlay
