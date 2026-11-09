@@ -25,6 +25,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 |-------|-------|-------|--------|
 | `radar.yaml` | generic ESP32-S3 5" (esp32-s3-5inch-rgb-001) | 800×480 RGB | `main` |
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C** = Sunton ESP32-8048S050 *(alpha-test)* | 800×480 RGB | `main` |
+| `radar-panda-touch.yaml` | BIGTREETECH Panda Touch *(alpha-test)* | 800×480 RGB | `main` |
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | 800×480 RGB | `main` |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | 1024×600 RGB | `main` |
 | `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 *(beta)* | 800×480 RGB | `main` |
@@ -312,6 +313,7 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 - Taiwan airspace — [Taiwan CAA eAIP](https://ais.caa.gov.tw/) ENR 2.1
 - Airspace elsewhere (optional) — [openAIP](https://www.openaip.net/) (CC BY-NC)
 - microSD storage components (`lvgl9` branch) — [p1ngb4ck's ESPHome fork](https://github.com/p1ngb4ck/esphome)
+- Panda Touch pinout and panel timing — [bigtreetech/PandaTouch_PlatformIO](https://github.com/bigtreetech/PandaTouch_PlatformIO), [theqkash/esp32flight](https://github.com/theqkash/esp32flight)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 - Climb/descent arrow glyphs — [DejaVu Sans](https://dejavu-fonts.github.io/)
 

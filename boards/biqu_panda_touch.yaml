@@ -1,0 +1,160 @@
+# =====================================================================
+#  Board: BIGTREETECH (BIQU) Panda Touch(#23)
+#         ESP32-S3 (16 MB flash, 8 MB octal PSRAM)
+#         5" 800x480 parallel-RGB(DE-only)+ GT911 觸控
+#
+#  與 boards/guition_jc8048w550.yaml 同級(N16R8、無 IO 擴充晶片),腳位不同:
+#      背光 GPIO21 / I2C SCL1,SDA2 / 觸控 RST41,INT40 / LCD reset GPIO46
+#      DE38 PCLK5,HSYNC/VSYNC 沒有接線
+#
+#  來源 / sources:
+#    腳位:bigtreetech/PandaTouch_PlatformIO(src/pt/pt_board.h、docs/PINOUT.md)
+#    時序:theqkash/esp32flight 的 k_pandatouch(抄自 BTT PandaTouch_IDF),
+#          使用者回報該韌體在此板可正常顯示。
+#  狀態:config + 編譯驗證,尚未實機燒錄(alpha-test)。
+# =====================================================================
+
+esphome:
+  platformio_options:
+    build_flags:
+      - "-DSCREEN_W=${disp_w}"
+      - "-DSCREEN_H=${disp_h}"
+      - "-DRADAR_CANVAS=${radar_canvas}"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  cpu_frequency: 240MHz
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
+    sdkconfig_options:
+      CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
+      CONFIG_LWIP_MAX_SOCKETS: "17"   # 同 Guition 板(11 TCP + 3 UDP + 3 TCP_LISTEN)
+      # flash 寫入時不停用 cache,避免 RGB 掃描永久跑掉(原因見 Guition 板檔)
+      CONFIG_SPIRAM_XIP_FROM_PSRAM: "y"
+
+# 本地覆寫:psram 避開 flash 廠商 ID 造成的 0x106;lvgl 繪圖緩衝進內部 SRAM(見 Guition 板檔)
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [psram, lvgl]
+
+# BTT 官方 SDK 就跑 120MHz;theqkash 實測 80MHz 下這片面板一有動作就抖
+psram:
+  mode: octal
+  speed: 120MHz
+
+# ---- 背光 Backlight (LEDC PWM) ----
+output:
+  - platform: ledc
+    pin: GPIO21                 # backlight PWM
+    id: bl_pwm
+    frequency: 30000Hz          # 原廠 PT_LCD_BL_FREQUENCY_HZ
+
+light:
+  - platform: monochromatic
+    id: backlight
+    output: bl_pwm
+    name: Backlight
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- 觸控 Touch (GT911, I2C) ----
+i2c:
+  sda: GPIO2                    # GT911 SDA
+  scl: GPIO1                    # GT911 SCL
+  frequency: 400kHz
+
+touchscreen:
+  - platform: gt911
+    id: my_touch
+    display: main_display
+    address: 0x5D
+    interrupt_pin: GPIO40
+    reset_pin: GPIO41
+    update_interval: 20ms     # 預設 50ms;縮短輪詢降低觸控延遲(I2C 負擔極小)
+    transform:
+      # 與 display 的 ${disp_rotation} 成對 —— LVGL 接手旋轉後會把 display
+      # rotation 歸零(lvgl_esphome.cpp),觸控不會自己跟著轉,得自己鏡像。
+      mirror_x: ${touch_mirror}
+      mirror_y: ${touch_mirror}
+    on_touch:
+      - lambda: |-
+          if (!id(backlight).current_values.is_on()) {
+            id(wake_ms) = millis();      // 剛喚醒,短時間內忽略 PWR 誤觸
+            auto call = id(backlight).turn_on();
+            call.perform();
+            lv_obj_add_state((lv_obj_t *) id(pwr_btn), LV_STATE_CHECKED);
+            lv_obj_set_style_text_color(id(pwr_btn_l), lv_color_hex(0x04180C), 0);
+          }
+    # 三指下滑 → 截圖(1.5 秒內平均 y 下移 70px 觸發一次)
+    on_update:
+      - lambda: |-
+          int n = (int) touches.size();
+          if (n >= 3) {
+            float my = 0;
+            for (auto &tp : touches) my += tp.y;
+            my /= n;
+            if (!id(shot_armed)) {
+              id(shot_armed) = true;
+              id(shot_y0) = my;
+              id(shot_ms) = millis();
+            } else if (my - id(shot_y0) > 70.0f && millis() - id(shot_ms) < 1500) {
+              id(shot_armed) = false;
+              id(take_screenshot).execute();
+            }
+          } else {
+            id(shot_armed) = false;
+          }
+    on_release:
+      - lambda: 'id(shot_armed) = false;'
+
+# ---- 螢幕 Display(parallel RGB,DE-only)----
+#   H_total = 800+4+8+8 = 820 ; V_total = 480+4+16+16 = 516
+#   23 MHz → 54.4 Hz;掃描頻寬約 42 MB/s(與 5B 相同,120MHz octal 餵得動)
+# rpi_dpi_rgb 的 hsync_pin/vsync_pin 是必填,而這片面板是 DE-only、兩支腳都沒接:
+# 指定主機板上沒用到的 GPIO42 / GPIO4(擴充座 SDA1,韌體未使用)當佔位,面板收不到訊號。
+display:
+  - platform: rpi_dpi_rgb
+    id: main_display
+    rotation: ${disp_rotation}
+    update_interval: never
+    auto_clear_enabled: false
+    color_order: RGB
+    pclk_frequency: 23MHz
+    pclk_inverted: true
+    dimensions:
+      width: ${disp_w}
+      height: ${disp_h}
+    reset_pin: GPIO46           # 面板 reset,放開前畫面不會動
+    de_pin: GPIO38              # data enable
+    hsync_pin: GPIO42           # 佔位,未接線(見上)
+    vsync_pin: GPIO4            # 佔位,未接線(見上)
+    pclk_pin: GPIO5             # pixel clock
+    hsync_pulse_width: 4
+    hsync_back_porch: 8
+    hsync_front_porch: 8
+    vsync_pulse_width: 4
+    vsync_back_porch: 16
+    vsync_front_porch: 16
+    data_pins:                  # RGB565: R3-R7 / G2-G7 / B3-B7,LSB first
+      red: [6, 7, 8, 9, 10]
+      green: [11, 12, 13, 14, 15, 16]
+      blue: [17, 18, 48, 47, 39]
+
+# ---- LVGL 繪圖緩衝:1/16 螢幕放內部 SRAM(見 Guition 板檔)----
+lvgl:
+  buffer_size: 12%
+
+# ---- 鬧鐘本地發聲:這片板子沒有已知的音訊硬體 ----
+# common/core.yaml 的 fire_alarm/hush_alarm 會無條件呼叫這兩個 script,所以每片
+# board 都要有
+script:
+  - id: local_ring_start
+    then:
+      - lambda: '// 無板載喇叭'
+  - id: local_ring_stop
+    then:
+      - lambda: '// 無板載喇叭'

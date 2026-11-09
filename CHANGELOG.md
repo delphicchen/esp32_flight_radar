@@ -3,6 +3,14 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.13-beta] — 2026-11-09
+
+### Added
+
+- **BIGTREETECH Panda Touch** (`radar-panda-touch.yaml`, #23). Alpha-test: built from BTT's
+  published pinout and panel timing, not yet flashed on this board. Flashing replaces the stock
+  Panda Touch firmware, so back it up first if you may want it back.
+
 ## [v1.3.13] — 2026-11-09
 
 ### Changed

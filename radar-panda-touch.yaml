@@ -1,0 +1,28 @@
+# =============================================================
+# Flight Radar — BIGTREETECH (BIQU) Panda Touch(#23)
+#   ESP32-S3 N16R8 + 5" 800x480 parallel-RGB(DE-only)+ GT911 觸控。
+#   與 radar.yaml 同一份 800x480 版面,腳位與時序見 boards/biqu_panda_touch.yaml。
+#
+# 狀態:config + 編譯驗證,尚未實機燒錄(alpha-test)。
+# =============================================================
+
+substitutions:
+  disp_w: "800"          # panel width  (px)
+  disp_h: "480"          # panel height (px)
+  radar_canvas: "456"    # square radar canvas side (px) — matches ui/ui_800x480.yaml
+  # font sizes (scaled per resolution)
+  f_small: "22"
+  f_mid: "28"
+  f_clock: "64"
+  f_mono: "18"
+  f_tiny: "14"
+  # 螢幕方向:兩個值必須成對修改
+  #   正立: disp_rotation "0°"   + touch_mirror "false"
+  #   倒轉: disp_rotation "180°" + touch_mirror "true"
+  disp_rotation: "0°"
+  touch_mirror: "false"
+
+packages:
+  core:  !include common/core.yaml
+  board: !include boards/biqu_panda_touch.yaml
+  ui:    !include ui/ui_800x480.yaml

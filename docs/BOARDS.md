@@ -18,6 +18,7 @@ new board file plus a matching layout — the shared logic never changes:
 ```
 radar.yaml            entry: ESP32-S3 + 800×480 RGB   (the original board)
 radar-jc8048w550.yaml entry: Guition JC8048W550C = Sunton ESP32-8048S050 (800×480 RGB)
+radar-panda-touch.yaml entry: BIGTREETECH Panda Touch (800×480 RGB, DE-only)
 radar-s3-5.yaml       entry: Waveshare ESP32-S3-Touch-LCD-5   (800×480 RGB)
 radar-s3-5b.yaml      entry: Waveshare ESP32-S3-Touch-LCD-5B  (1024×600 RGB)
 radar-s3-7.yaml       entry: Waveshare ESP32-S3-Touch-LCD-7   (800×480 RGB)
@@ -41,6 +42,7 @@ dimensions left to chase.
 |-------|-------|-----|-------|-------|--------|
 | `radar.yaml` | esp32-s3-5inch-rgb-001 (generic) | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | **verified on hardware** (incl. v1.3.0 downloaded maps) |
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C** (= Sunton ESP32-8048S050) | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | config + build verified, **not yet flashed** |
+| `radar-panda-touch.yaml` | BIGTREETECH Panda Touch | ESP32-S3 | 800×480 parallel-RGB (DE-only) | native | config + build verified, **not yet flashed** (alpha-test) |
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | ESP32-S3 | 800×480 parallel-RGB (ST7262) | native | config + build verified, **not yet flashed** |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 parallel-RGB | native | **verified on hardware** |
 | `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 | ESP32-S3 | 800×480 parallel-RGB | native | config + build verified, **not yet flashed** (beta) — reuses the Touch-LCD-5 board file, only the panel model/vsync porches differ |
@@ -195,6 +197,7 @@ matching `external_components` block to fall back to the built-in components.
 ```
 radar.yaml            入口:ESP32-S3 + 800×480 RGB(原始板)
 radar-jc8048w550.yaml 入口:Guition JC8048W550C = Sunton ESP32-8048S050(800×480 RGB)
+radar-panda-touch.yaml 入口:BIGTREETECH Panda Touch(800×480 RGB,DE-only)
 radar-s3-5.yaml       入口:微雪 ESP32-S3-Touch-LCD-5(800×480 RGB)
 radar-s3-5b.yaml      入口:微雪 ESP32-S3-Touch-LCD-5B(1024×600 RGB)
 radar-s3-7.yaml       入口:微雪 ESP32-S3-Touch-LCD-7(800×480 RGB)
@@ -215,6 +218,7 @@ display 驅動與 C++ 巨集(透過 `build_flags` → `radar_fetch.h`),不再有
 |------|------|--------|------|-------|------|
 | `radar.yaml` | esp32-s3-5inch-rgb-001(通用) | ESP32-S3 | 800×480 parallel-RGB(ST7262) | 原生 | **實機驗證過**(含 v1.3.0 下載式地圖) |
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C**(= Sunton ESP32-8048S050) | ESP32-S3 | 800×480 parallel-RGB(ST7262) | 原生 | config + 編譯驗證,**尚未實機燒錄** |
+| `radar-panda-touch.yaml` | BIGTREETECH Panda Touch | ESP32-S3 | 800×480 parallel-RGB(DE-only) | 原生 | config + 編譯驗證,**尚未實機燒錄**(alpha-test) |
 | `radar-s3-5.yaml` | 微雪 ESP32-S3-Touch-LCD-5 | ESP32-S3 | 800×480 parallel-RGB(ST7262) | 原生 | config + 編譯驗證,**尚未實機燒錄** |
 | `radar-s3-5b.yaml` | 微雪 ESP32-S3-Touch-LCD-5B | ESP32-S3 | 1024×600 parallel-RGB | 原生 | **實機驗證過** |
 | `radar-s3-7.yaml` | 微雪 ESP32-S3-Touch-LCD-7 | ESP32-S3 | 800×480 parallel-RGB | 原生 | config + 編譯驗證,**尚未實機燒錄**(beta)—— 沿用 Touch-LCD-5 板檔,只換面板 model 與 vsync porch |

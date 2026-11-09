@@ -51,6 +51,7 @@ case "$BRANCH" in
     ENTRIES=(
       "radar.yaml:s3-800x480-generic:ESP32-S3"
       "radar-jc8048w550.yaml:s3-jc8048w550:ESP32-S3"
+      "radar-panda-touch.yaml:s3-panda-touch:ESP32-S3"
       "radar-s3-5.yaml:s3-touch-lcd-5:ESP32-S3"
       "radar-s3-5b.yaml:s3-touch-lcd-5b:ESP32-S3"
       "radar-s3-7.yaml:s3-touch-lcd-7:ESP32-S3"
