@@ -665,6 +665,23 @@ script:
           auto set_txt = [](lv_obj_t *l, const char *t) {   // 文字沒變就不重設,省重繪
             if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
           };
+          // 樣式與顯示旗標同樣先比對:LVGL 的 set_style/clear_flag 不檢查新舊值,一呼叫就重繪
+          auto set_bg = [](lv_obj_t *o, uint32_t hex) {
+            lv_color_t c = lv_color_hex(hex);
+            if (lv_obj_get_style_bg_color(o, 0).full != c.full) lv_obj_set_style_bg_color(o, c, 0);
+          };
+          auto set_border = [](lv_obj_t *o, uint32_t hex, lv_coord_t w) {
+            lv_color_t c = lv_color_hex(hex);
+            if (lv_obj_get_style_border_color(o, 0).full != c.full) lv_obj_set_style_border_color(o, c, 0);
+            if (lv_obj_get_style_border_width(o, 0) != w) lv_obj_set_style_border_width(o, w, 0);
+          };
+          auto set_tc = [](lv_obj_t *o, uint32_t hex) {
+            lv_color_t c = lv_color_hex(hex);
+            if (lv_obj_get_style_text_color(o, 0).full != c.full) lv_obj_set_style_text_color(o, c, 0);
+          };
+          auto show = [](lv_obj_t *o) {
+            if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+          };
           // 雷達圈內的航機,依與 home 的距離由近到遠
           float lat0 = id(home_lat).state, lon0 = id(home_lon).state;
           float rng = id(radar_range).state;
@@ -727,7 +744,7 @@ script:
             // 第 3 行:只有選中的才展開,顯示起訖站
             if (is_sel) {
               set_txt(lc[r], id(sel_route_g).empty() ? "ROUTE ..." : id(sel_route_g).c_str());
-              lv_obj_clear_flag(lc[r], LV_OBJ_FLAG_HIDDEN);
+              show(lc[r]);
             } else {
               lv_obj_add_flag(lc[r], LV_OBJ_FLAG_HIDDEN);
             }
@@ -739,14 +756,13 @@ script:
             // 配色:左側色條=STCA 紅 / 爬升亮綠 / 下降琥珀 / 平飛綠;
             // 選中=外框改成與色條同色(2px)+ 呼號行白色,底色不反白
             uint32_t bc = cfl[i] ? 0xFF3030 : (trend == '^' ? 0x00FF41 : (trend == 'v' ? 0xE8A020 : 0x00A050));
-            lv_obj_set_style_bg_color(bar[r], lv_color_hex(bc), 0);
-            lv_obj_set_style_bg_color(box[r], lv_color_hex(is_sel ? 0x10281A : 0x0A1F12), 0);
-            lv_obj_set_style_border_color(box[r], lv_color_hex(is_sel ? bc : 0x003820), 0);
-            lv_obj_set_style_border_width(box[r], is_sel ? 2 : 1, 0);
-            lv_obj_set_style_text_color(la[r], lv_color_hex(is_sel ? 0xFFFFFF : 0xD2E6D7), 0);
-            lv_obj_set_style_text_color(lb[r], lv_color_hex(0xD2E6D7), 0);
-            lv_obj_set_style_text_color(lc[r], lv_color_hex(0x9AB8A2), 0);
-            lv_obj_clear_flag(box[r], LV_OBJ_FLAG_HIDDEN);
+            set_bg(bar[r], bc);
+            set_bg(box[r], is_sel ? 0x10281A : 0x0A1F12);
+            set_border(box[r], is_sel ? bc : 0x003820, is_sel ? 2 : 1);
+            set_tc(la[r], is_sel ? 0xFFFFFF : 0xD2E6D7);
+            set_tc(lb[r], 0xD2E6D7);
+            set_tc(lc[r], 0x9AB8A2);
+            show(box[r]);
           }
           if (cnt > 0) snprintf(b, sizeof(b), "%d/%d", id(list_page) + 1, pages);
           else         snprintf(b, sizeof(b), "--");
@@ -1106,8 +1122,6 @@ interval:
       - lambda: |-
           // i 鈕開啟中 → 每秒刷新系統資訊(RAM/PSRAM/運行時間會變)
           if (id(info_on)) id(show_sysinfo).execute();
-          // #22 列表模式 → 每秒重排 strip(距離、高度會變)
-          if (id(list_on)) id(strips_update).execute();
           // 工具列每秒置頂一次:航班 mark 顯隱/set_pos 後偶發搶上層,SYS 就點不到
           {
             lv_obj_t *tb[] = {
@@ -1115,8 +1129,15 @@ interval:
               (lv_obj_t *) id(atc_btn), (lv_obj_t *) id(pwr_btn),
               (lv_obj_t *) id(info_btn),
             };
-            for (auto *b : tb) {
-              if (b) lv_obj_move_foreground(b);
+            // move_foreground 每次都會 invalidate 整個 main_page(等於全螢幕重繪),
+            // 所以只有順序真的被打亂時才重排
+            bool top = true;
+            for (int k = 0; k < 5; k++)
+              if (!tb[k] || lv_obj_get_child(lv_obj_get_parent(tb[k]), k - 5) != tb[k]) { top = false; break; }
+            if (!top) {
+              for (auto *b : tb) {
+                if (b) lv_obj_move_foreground(b);
+              }
             }
           }
           // 響鈴中 → 每 15 秒重播一次,直到使用者按 DISMISS
@@ -1693,6 +1714,9 @@ interval:
               lv_obj_add_flag(ln, LV_OBJ_FLAG_HIDDEN);
             }
           }
+      # #22 列表模式 → 每秒重排 strip(距離、高度會變);延後 300ms,避開上面航機更新那一輪重繪
+      - delay: 300ms
+      - lambda: 'if (id(list_on)) id(strips_update).execute();'
   # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;6 秒轉一圈,角度用時間基準→不受幀率漂移)
   - interval: 30ms
     then:

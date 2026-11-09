@@ -3,6 +3,15 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [Unreleased]
+
+### Changed
+
+- **Less needless redrawing** (#22). The toolbar no longer forces a full-screen repaint every
+  second, flight strips repaint only when their colours or visibility actually change, and
+  their once-a-second refresh now runs 300 ms after the aircraft update. The selected track is
+  drawn fully opaque.
+
 ## [v1.3.12] — 2026-11-08
 
 Prebuilt images for all six S3 boards, including the Touch-LCD-7 and 7B, which leave their
