@@ -25,7 +25,7 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 |-------|-------|-------|--------|
 | `radar.yaml` | generic ESP32-S3 5" (esp32-s3-5inch-rgb-001) | 800×480 RGB | `main` |
 | `radar-jc8048w550.yaml` | Guition JC8048W550**C** = Sunton ESP32-8048S050 *(alpha-test)* | 800×480 RGB | `main` |
-| `radar-panda-touch.yaml` | BIGTREETECH Panda Touch *(alpha-test)* | 800×480 RGB | `main` |
+| `radar-panda-touch.yaml` | BIGTREETECH Panda Touch | 800×480 RGB | `main` |
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | 800×480 RGB | `main` |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | 1024×600 RGB | `main` |
 | `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 *(beta)* | 800×480 RGB | `main` |

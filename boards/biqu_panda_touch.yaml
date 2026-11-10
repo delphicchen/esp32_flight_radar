@@ -11,7 +11,7 @@
 #    腳位:bigtreetech/PandaTouch_PlatformIO(src/pt/pt_board.h、docs/PINOUT.md)
 #    時序:theqkash/esp32flight 的 k_pandatouch(抄自 BTT PandaTouch_IDF),
 #          使用者回報該韌體在此板可正常顯示。
-#  狀態:config + 編譯驗證,尚未實機燒錄(alpha-test)。
+#  狀態:使用者實測畫面與觸控正常(#23,v1.3.13-beta)。
 # =====================================================================
 
 esphome:
