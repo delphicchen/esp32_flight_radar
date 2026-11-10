@@ -1,12 +1,12 @@
 {
   "name": "ESP32 Flight Radar (s3-panda-touch)",
-  "version": "v1.3.13-beta",
+  "version": "v1.3.14",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
-        { "path": "firmware/flight-radar-s3-panda-touch-v1.3.13-beta.factory.bin", "offset": 0 }
+        { "path": "firmware/flight-radar-s3-panda-touch-v1.3.14.factory.bin", "offset": 0 }
       ]
     }
   ]
