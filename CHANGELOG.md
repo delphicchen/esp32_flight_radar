@@ -3,6 +3,18 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.14] — 2026-11-10
+
+### Changed
+
+- **Larger CPU caches on all S3 boards** (#22, #23), aimed at the screen briefly jumping or
+  shaking when you tap an aircraft or new data arrives. Big redraws write a lot to PSRAM, and
+  the RGB panel's refill can fall behind. Following Espressif's advice for RGB panels, the data
+  cache goes from 32 KB to 64 KB with 64-byte lines and the instruction cache from 16 KB to
+  32 KB. This costs about 48 KB of internal RAM. It has not yet been confirmed on the
+  affected boards.
+- The Panda Touch build leaves beta: a user confirmed the screen and touch work.
+
 ## [v1.3.13-beta] — 2026-11-09
 
 ### Added

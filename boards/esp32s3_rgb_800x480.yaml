@@ -29,6 +29,12 @@ esp32:
       enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
     sdkconfig_options:
       CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
+      # 畫面瞬間跳動(#22/#23):大面積重繪時 CPU 大量寫 PSRAM,加上 XIP 讓程式也從
+      # PSRAM 取指,cache 太小 → bounce buffer 補不及。照 Espressif 對 RGB 面板的建議
+      # 加大 cache(預設 D 32KB/32B line、I 16KB),代價約 48KB 內部 RAM。
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
       # 預設 10 會被 API/web/mDNS/TLS 佔滿,截圖 httpd 起不來(errno 23)。
       # 17 是 ESPHome 依實際元件算出的需求(11 TCP + 3 UDP + 3 TCP_LISTEN);
       # 原本設 16 會在建置時被警告,執行期表現為連線隨機失敗(esp-tls
