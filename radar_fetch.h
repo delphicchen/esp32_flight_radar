@@ -895,7 +895,10 @@ inline void ensure_task() {
   static bool created = false;
   if (!created) {
     created = true;
-    xTaskCreatePinnedToCore(task_fn, "radar_fetch", 12288, nullptr, 1, nullptr, 1);
+    // 釘 core 0(與 WiFi 同核),避開 core 1 的主迴圈/LVGL 與 RGB 面板 bounce buffer ISR。
+    // #22/#23 量測:放 core 1 時每次抓資料(TLS/解析)讓 ISR 晚 ~1ms → 畫面瞬間跳動。
+    // 作法同 theqkash/esp32flight(flight_task 釘 core 0)。
+    xTaskCreatePinnedToCore(task_fn, "radar_fetch", 12288, nullptr, 1, nullptr, 0);
   }
 }
 

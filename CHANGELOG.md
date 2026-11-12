@@ -3,6 +3,21 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.15] — 2026-11-12
+
+### Fixed
+
+- **Screen briefly jumping or shaking** on RGB boards (#22, #23), every time new data arrived
+  or when you tapped an aircraft. Measured on a board: the interrupt that refills the RGB
+  panel was running about 1 ms late at those moments, so the panel sent stale lines. Two
+  changes, after [theqkash/esp32flight](https://github.com/theqkash/esp32flight):
+  - The background data-fetch task now runs on core 0, away from the display and the panel
+    interrupt on core 1.
+  - The panel interrupt now lives in internal RAM (`CONFIG_LCD_RGB_ISR_IRAM_SAFE`), together
+    with the existing XIP-from-PSRAM setting. Turning it on alone used to crash; the pair is safe.
+- The larger CPU caches from v1.3.14 are reverted. They did not help and used about 48 KB of
+  internal RAM, which network connections need.
+
 ## [v1.3.14] — 2026-11-10
 
 ### Changed

@@ -47,12 +47,6 @@ esp32:
       enable_idf_experimental_features: true   # 120MHz octal PSRAM 需要
     sdkconfig_options:
       CONFIG_SPIRAM_USE_MALLOC: "y"   # >16KB 的 malloc 走 PSRAM,避免內部 RAM 耗盡
-      # 畫面瞬間跳動(#22/#23):大面積重繪時 CPU 大量寫 PSRAM,加上 XIP 讓程式也從
-      # PSRAM 取指,cache 太小 → bounce buffer 補不及。照 Espressif 對 RGB 面板的建議
-      # 加大 cache(預設 D 32KB/32B line、I 16KB),代價約 48KB 內部 RAM。
-      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
-      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
-      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
       CONFIG_LWIP_MAX_SOCKETS: "17"   # 依實際元件算出的需求(11 TCP + 3 UDP + 3 TCP_LISTEN)
       # --- 畫面抖動/裂成數段:XIP from PSRAM ---
       # 兩塊 Waveshare RGB 板都靠這一行解掉同一類症狀(見那兩份板檔的長註解)。
@@ -65,6 +59,11 @@ esp32:
       # 這在 v1.3.0 之後特別重要:地圖改成執行期下載,執行中會真的寫 flash,
       # 以前地圖是 rodata、幾乎不寫,所以同樣的缺陷不會被觸發。
       CONFIG_SPIRAM_XIP_FROM_PSRAM: "y"
+      # 畫面瞬間跳動(#22/#23):bounce buffer 補充 ISR 放進 IRAM,不再被 cache miss
+      # 拖慢(白牌實測:抓資料/點飛機時 ISR 晚 ~1ms → 送出舊資料)。必須與上面的 XIP
+      # 合開——單開時 flash 寫入會停用 cache,ISR 讀 PSRAM framebuffer 直接 crash。
+      # 組合參考 theqkash/esp32flight。v1.3.14 加大的 cache 已撤回(無效且吃內部 RAM)。
+      CONFIG_LCD_RGB_ISR_IRAM_SAFE: "y"
 
 # ---- 本地覆寫的元件(components/,各檔內有「本地覆寫」註解標明唯一改動點)----
 # psram:拿掉上游在 octal + 120MHz + IDF>=5.4 時無條件開啟的

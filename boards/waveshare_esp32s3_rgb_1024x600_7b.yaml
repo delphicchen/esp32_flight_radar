@@ -58,12 +58,6 @@ esp32:
       include_builtin_idf_components: [fatfs]
     sdkconfig_options:
       CONFIG_SPIRAM_USE_MALLOC: "y"
-      # 畫面瞬間跳動(#22/#23):大面積重繪時 CPU 大量寫 PSRAM,加上 XIP 讓程式也從
-      # PSRAM 取指,cache 太小 → bounce buffer 補不及。照 Espressif 對 RGB 面板的建議
-      # 加大 cache(預設 D 32KB/32B line、I 16KB),代價約 48KB 內部 RAM。
-      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
-      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
-      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
       # 17 = ESPHome 依實際元件算出的需求(11 TCP + 3 UDP + 3 TCP_LISTEN)。
       # 設 16 會被警告 socket 不足,執行期可能 socket 耗盡。
       CONFIG_LWIP_MAX_SOCKETS: "17"
@@ -75,19 +69,19 @@ esp32:
       CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN: "8192"  # 預設 16384;減半再省一半 TLS 緩衝
       # 不要開 CONFIG_LCD_RGB_RESTART_IN_VSYNC:實測於本板無效——位移沒有消失,
       # 反而因為每個 VBlank 重置 GDMA 通道而造成畫面嚴重抖動。
-      # 不要開 CONFIG_LCD_RGB_ISR_IRAM_SAFE:理論上它能修水平錯置(flash cache
-      # 停用期間 bounce buffer ISR 被擋 → permanent desync),但實測開機直接
-      # crash loop 進 safe mode:
-      #   Guru Meditation Error: Core 1 panic'ed (Cache error).
-      #   Cache disabled but cached memory region accessed
-      # 因為 ESPHome mipi_rgb 驅動的 ISR 呼叫鏈不是 IRAM-safe(callback/資料
-      # 不在 IRAM/DRAM),cache 一關 ISR 反而炸掉。要用它得先改驅動本身。
+      # 註:CONFIG_LCD_RGB_ISR_IRAM_SAFE 以前單獨開會 crash loop(Cache disabled but
+      # cached memory region accessed);v1.3.15 起與下面的 XIP 合開,見其下方說明。
       # --- 水平錯置/抖動:XIP from PSRAM(ISR_IRAM_SAFE 的正規替代)---
       # 把程式碼+rodata 搬進 PSRAM 執行,flash 寫入(NVS/WiFi 校準)期間
       # cache 不再停用 → bounce buffer 補充 ISR 不被擋 → 消除 permanent
       # desync 的觸發源。不需改驅動。代價:韌體佔 ~2MB PSRAM、cache miss
       # 改走 PSRAM 匯流排(LVGL 渲染已移入內部 SRAM,騰出了餘裕)。
       CONFIG_SPIRAM_XIP_FROM_PSRAM: "y"
+      # 畫面瞬間跳動(#22/#23):bounce buffer 補充 ISR 放進 IRAM,不再被 cache miss
+      # 拖慢(白牌實測:抓資料/點飛機時 ISR 晚 ~1ms → 送出舊資料)。必須與上面的 XIP
+      # 合開——單開時 flash 寫入會停用 cache,ISR 讀 PSRAM framebuffer 直接 crash。
+      # 組合參考 theqkash/esp32flight。v1.3.14 加大的 cache 已撤回(無效且吃內部 RAM)。
+      CONFIG_LCD_RGB_ISR_IRAM_SAFE: "y"
 
 # ---- 本地覆寫的元件(components/,各檔內有「本地覆寫」註解標明唯一改動點)----
 # psram    :停用溫感 timing 選項,保住 120MHz octal(詳下)

@@ -314,6 +314,7 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 - Airspace elsewhere (optional) — [openAIP](https://www.openaip.net/) (CC BY-NC)
 - microSD storage components (`lvgl9` branch) — [p1ngb4ck's ESPHome fork](https://github.com/p1ngb4ck/esphome)
 - Panda Touch pinout and panel timing — [bigtreetech/PandaTouch_PlatformIO](https://github.com/bigtreetech/PandaTouch_PlatformIO), [theqkash/esp32flight](https://github.com/theqkash/esp32flight)
+- RGB panel stability (fetch task on core 0, IRAM-safe panel interrupt) — [theqkash/esp32flight](https://github.com/theqkash/esp32flight)
 - Concept — [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 - Climb/descent arrow glyphs — [DejaVu Sans](https://dejavu-fonts.github.io/)
 
