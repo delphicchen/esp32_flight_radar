@@ -38,6 +38,9 @@ esphome:
                      maptiles::stored_lon, (int) maptiles::stored_level);
             id(maps_key) = k;
           }
+          // 回波透明度(#23):在重建底圖前交給合成程式
+          id(echo_opa) = std::max(20, std::min(100, id(echo_opa)));
+          radar_bg::g_echo_opa = (uint8_t) id(echo_opa);
           // 開機重建底圖(map_on/echo_on 已自 NVS 還原),同時蓋掉 PSRAM 未初始化雜訊
           // 喇叭下拉選單:字型無 FontAwesome 箭頭字形(U+F078),移除符號免警告
           LvDropdownType *dds[8] = { id(a0_dd), id(a1_dd), id(a2_dd), id(a3_dd), id(spk_dd), id(tz_dd),
@@ -105,6 +108,8 @@ esphome:
               lv_obj_set_style_text_color(l.lbl, lv_color_hex(0x201200), 0);   // amber 反白
             }
           }
+          // 回波透明度:還原滑桿位置(數值已在開機第一段交給合成程式)
+          lv_slider_set_value((lv_obj_t *) id(echo_opa_slider), id(echo_opa), LV_ANIM_OFF);
           if (id(poll_when_off)) {
             lv_obj_add_state((lv_obj_t *) id(poff_btn), LV_STATE_CHECKED);
             lv_obj_set_style_text_color(id(poff_btn_l), lv_color_hex(0x04180C), 0);
@@ -477,6 +482,7 @@ globals:
   - { id: atc_apt_on, type: bool, restore_value: true, initial_value: 'true' }   # 機場
   - { id: atc_fix_on, type: bool, restore_value: true, initial_value: 'true' }   # 導航點
   - { id: atc_route_on, type: bool, restore_value: true, initial_value: 'false' }  # 標籤起訖站行(逐架查 adsbdb)
+  - { id: echo_opa, type: int, restore_value: true, initial_value: '100' }       # 回波透明度 20~100%(ATC CONF 滑桿,#23)
   - { id: tz_sel, type: int, restore_value: true, initial_value: '0' }             # 時區下拉選擇(index，對齊 tz_posix)
   - { id: tz_auto, type: std::string, restore_value: true, max_restore_data_length: 48 }   # AUTO 上次查到的 POSIX TZ(開機不必等網路)
   # 夜間模式(背光無 PWM 的板子用):100=不暗化 5=最暗;night_ov 為 LVGL top layer 遮罩

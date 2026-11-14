@@ -132,6 +132,7 @@ inline volatile bool g_route_ready = false;
 #define ECHO_N ((RADAR_CANVAS + ECHO_DS - 1) / ECHO_DS)
 inline uint8_t *g_echo_buf = nullptr;    // 離屏合成緩衝 ECHO_N*ECHO_N*3 (PSRAM)
 inline volatile bool g_echo_ready = false;   // true=g_echo_buf 有整幀待主迴圈換上
+inline uint8_t g_echo_opa = 100;           // 回波透明度 20~100%,合成時乘上每格 alpha(#23)
 // 回波非透明格的逐列水平範圍(以回波格為單位,x0 > x1 表示該列全透明)。
 // 底圖重建每次都要把回波混進去,降雨通常只佔畫面一小塊、常常甚至整張全空。
 // 合成時順手記下每列的左右界,混合就只走真的有資料的區段;
@@ -1151,6 +1152,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   // 畫面一小塊,沒下雨時整張全空,只碰真的有資料的區段。底圖重建每次都做這一步
   // (不進快取),所以省下的是每次的固定成本。
   if (echo_show && radar_bg::g_echo_buf) {
+    const uint16_t eopa = radar_bg::g_echo_opa;   // 使用者設的回波透明度(%)
     lv_color_t *rows = (lv_color_t *) (void *) img->data;
     for (int y = 0; y < RADAR_CANVAS; y++) {
       const int ey = y / ECHO_DS;
@@ -1165,7 +1167,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         if (sp[2] < 8) continue;   // 區段內的空隙,保留底圖
         lv_color_t fg;
         fg.full = (uint16_t) sp[0] | ((uint16_t) sp[1] << 8);
-        *dst = lv_color_mix(fg, *dst, sp[2]);
+        *dst = lv_color_mix(fg, *dst, (lv_opa_t) (sp[2] * eopa / 100));
       }
     }
   }

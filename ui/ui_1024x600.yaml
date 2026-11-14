@@ -5319,9 +5319,9 @@ lvgl:
               - button:
                   id: asp_btn
                   x: 13
-                  y: 70
+                  y: 58
                   width: 173
-                  height: 55
+                  height: 40
                   radius: 5
                   checkable: true
                   bg_color: 0x040C08
@@ -5339,9 +5339,9 @@ lvgl:
               - button:
                   id: rwy_btn
                   x: 193
-                  y: 70
+                  y: 58
                   width: 173
-                  height: 55
+                  height: 40
                   radius: 5
                   checkable: true
                   bg_color: 0x040C08
@@ -5359,9 +5359,9 @@ lvgl:
               - button:
                   id: apt_btn
                   x: 13
-                  y: 140
+                  y: 105
                   width: 173
-                  height: 55
+                  height: 40
                   radius: 5
                   checkable: true
                   bg_color: 0x040C08
@@ -5379,9 +5379,9 @@ lvgl:
               - button:
                   id: fix_btn
                   x: 193
-                  y: 140
+                  y: 105
                   width: 173
-                  height: 55
+                  height: 40
                   radius: 5
                   checkable: true
                   bg_color: 0x040C08
@@ -5399,9 +5399,9 @@ lvgl:
               - button:
                   id: route_btn
                   x: 13
-                  y: 203
+                  y: 153
                   width: 353
-                  height: 43
+                  height: 40
                   radius: 5
                   checkable: true
                   bg_color: 0x040C08
@@ -5416,6 +5416,35 @@ lvgl:
                         id(atc_route_on) = lv_obj_has_state((lv_obj_t *) id(route_btn), LV_STATE_CHECKED);
                         lv_obj_set_style_text_color(id(route_btn_l),
                             lv_color_hex(id(atc_route_on) ? 0x201200 : 0xE8A020), 0);
+              # #23 回波透明度:放開滑桿才重建底圖(拖曳中不重建,底圖重建很重)
+              - label: { x: 13, y: 208, text: "ECHO", text_font: font_small, text_color: 0xE8A020 }
+              - slider:
+                  id: echo_opa_slider
+                  x: 105
+                  y: 220
+                  width: 245
+                  height: 13
+                  min_value: 20
+                  max_value: 100
+                  value: 100
+                  bg_color: 0x241A08
+                  bg_opa: COVER
+                  radius: 6
+                  indicator:
+                    bg_color: 0xB07818
+                  knob:
+                    bg_color: 0xE8A020
+                    radius: 10
+                    pad_all: 5
+                  on_release:
+                    - lambda: |-
+                        id(echo_opa) = lv_slider_get_value((lv_obj_t *) id(echo_opa_slider));
+                        radar_bg::g_echo_opa = (uint8_t) id(echo_opa);
+                    - if:
+                        condition:
+                          lambda: 'return id(echo_on);'
+                        then:
+                          - script.execute: rebuild_base
 
         # ===== SYS 面板分頁列(SYS 開啟時顯示;蓋住底下的標題列)=====
         - obj:
@@ -6103,7 +6132,7 @@ lvgl:
         - button:
             id: sweep_btn
             x: 38
-            y: 526
+            y: 525
             width: 348
             height: 48
             radius: 5
