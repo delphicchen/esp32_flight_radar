@@ -3,6 +3,16 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.16] — 2026-11-15
+
+### Added
+
+- **Echo opacity slider** (#23). In **SYS → ATC CONF** there is now an **ECHO** slider that sets
+  how strongly the rain echo covers the map, from 20% to 100%. The default is 100%, the same
+  as before. Lower it when heavy rain hides the map. The map redraws when you let go of the
+  slider, and the setting survives a reboot. The ATC CONF layer buttons are a little shorter
+  to make room.
+
 ## [v1.3.15] — 2026-11-12
 
 ### Fixed
