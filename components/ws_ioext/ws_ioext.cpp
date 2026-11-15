@@ -75,7 +75,19 @@ void WsIoExtPwmOutput::write_state(float state) {
   // 極性是反的:PWM 值越大越暗(實機回報,#17)。官方 IO_EXTENSION_Pwm_Output()
   // 把上限夾在 97%(≈247)免得全黑,滑桿照做;只有 state 0(PWR 鍵關燈)寫 255 全黑。
   uint8_t v = state <= 0.0f ? 255 : (uint8_t) ((1.0f - state) * 247.0f + 0.5f);
+  // 7B 原理圖:DISP(EXIO2)與 EXIO_PWM 同接 AP3032 的 EN。DISP 一直拉高時,PWM
+  // 寫 255 也拉不到底,背光只會變暗不會滅(#25)→ 關燈時一併拉低 enable 腳。
+  // 開燈要先拉回 enable 再寫 PWM;只在狀態改變時寫,拖亮度滑桿不多打 I2C。
+  const bool on = state > 0.0f;
+  if (this->enable_pin_ >= 0 && on && !this->enabled_) {
+    this->parent_->digital_write(this->enable_pin_, true);
+    this->enabled_ = true;
+  }
   this->parent_->write_pwm(v);
+  if (this->enable_pin_ >= 0 && !on && this->enabled_) {
+    this->parent_->digital_write(this->enable_pin_, false);
+    this->enabled_ = false;
+  }
 }
 #endif
 

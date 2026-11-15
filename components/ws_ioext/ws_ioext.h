@@ -62,8 +62,13 @@ class WsIoExtGPIOPin : public GPIOPin, public Parented<WsIoExtComponent> {
 
 #ifdef USE_OUTPUT
 class WsIoExtPwmOutput : public output::FloatOutput, public Parented<WsIoExtComponent> {
+ public:
+  void set_enable_pin(uint8_t pin) { this->enable_pin_ = pin; }
+
  protected:
   void write_state(float state) override;
+  int8_t enable_pin_{-1};   // -1 = 不控制 enable 腳
+  bool enabled_{true};      // enable 腳目前狀態(開機時 display 已拉高)
 };
 #endif
 

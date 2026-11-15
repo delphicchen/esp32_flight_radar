@@ -139,14 +139,16 @@ switch:
       number: 4
 
 # ---- Backlight ----
-# EXIO2 是背光 enable(由下方 display 的 enable_pin 拉高並保持),亮度由
-# 擴充晶片的 PWM 暫存器控制 → 與通用板一樣用 monochromatic light,
-# PWR 鍵關燈 = PWM 寫 255。擴充晶片的 PWM 是反向的(值越大越暗),
+# EXIO2 是背光 enable(開機由下方 display 的 enable_pin 拉高),亮度由
+# 擴充晶片的 PWM 暫存器控制 → 與通用板一樣用 monochromatic light。
+# 原理圖上 DISP(EXIO2)與 EXIO_PWM 同接 AP3032 的 EN,只寫 PWM 255 關不全,
+# 所以 PWR 鍵關燈 = PWM 寫 255 + EXIO2 拉低(output 的 enable_pin,#25)。擴充晶片的 PWM 是反向的(值越大越暗),
 # 已在 ws_ioext.cpp 的 write_state() 處理,這裡不要再加 inverted: true。
 output:
   - platform: ws_ioext
     id: bl_pwm
     ws_ioext: io_ex
+    enable_pin: 2               # EXIO2 = DISP,關燈時一併拉低
 
 light:
   - platform: monochromatic

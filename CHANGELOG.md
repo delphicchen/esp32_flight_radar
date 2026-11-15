@@ -3,6 +3,16 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.17] — 2026-11-15
+
+### Fixed
+
+- **PWR button only dimmed the screen on the Touch-LCD-7B** (#25) instead of turning it off.
+  The schematic shows the backlight driver's enable line wired to both the IO expander's PWM
+  and its DISP pin (EXIO2). The firmware kept DISP high and only lowered the PWM, so the line
+  never went fully low. PWR now pulls DISP low as well, and pulls it back high on wake.
+  Build-verified only; not yet tested on a 7B.
+
 ## [v1.3.16] — 2026-11-15
 
 ### Added
