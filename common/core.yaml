@@ -475,7 +475,10 @@ globals:
   - id: data_src
     type: int
     restore_value: true
-    initial_value: '0'        # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)
+    # 航班來源:0=OpenSky 1=airplanes.live 2=adsb.lol(設定頁 SRC 列)。
+    # 新安裝預設 adsb.lol:OpenSky 要憑證(沒填只顯示 SET OPENSKY CREDENTIALS,
+    # 新使用者以為壞掉),airplanes.live 已全面 403。已存過的裝置照 NVS 不受影響。
+    initial_value: '2'
   # ATC 圖層開關(右下面板設定,各自存 NVS)
   - { id: atc_asp_on, type: bool, restore_value: true, initial_value: 'true' }   # 空域邊界
   - { id: atc_rwy_on, type: bool, restore_value: true, initial_value: 'true' }   # 跑道+延伸線
@@ -1211,8 +1214,12 @@ interval:
             // portal(is_connected() 在 AP 模式也成立),抓一定失敗;先前是送出
             // 請求就把 key 寫掉,於是連上網之後再也不會重試,地圖永遠是空的。
             // 失敗只更新 maps_try_ms,5 分鐘後再試一次 —— 有節流但不會放棄。
+            // 5 分鐘只擋「同一組 key 失敗後重試」;座標/半徑一改(key 不同)就立刻抓。
+            // 以前所有嘗試共用這 5 分鐘:新裝好先抓預設台北、改成自家座標後還得
+            // 乾等到 5 分鐘滿,加上首抓常在熱點模式失敗,地圖要等近 8 分鐘(#23)。
             if (id(maps_key) != key &&
-                (id(maps_try_ms) == 0 || millis() - id(maps_try_ms) > 300000)) {
+                (id(maps_key_try) != key || id(maps_try_ms) == 0 ||
+                 millis() - id(maps_try_ms) > 300000)) {
               id(maps_try_ms) = millis();
               id(maps_key_try) = key;
               radar_bg::request_maps(id(home_lat).state, id(home_lon).state,

@@ -3,6 +3,29 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.18] — 2026-11-16
+
+### Fixed
+
+- **Touch-LCD-7B screen stayed dark after waking from PWR** (#25), a regression in v1.3.17.
+  Turning the backlight off wrote the maximum PWM value (255) while also pulling the enable
+  pin low, and the board's IO expander then would not bring the backlight back. It now writes
+  247 instead, the 7B's safe limit used by ESPHome's own driver for this chip. Build-verified
+  only; not yet tested on a 7B.
+
+- **Slow first start** (#23). After a fresh install the map could take about 8 minutes to
+  appear. Every map download attempt shared one 5-minute retry wait. So if the first attempt
+  failed (often it runs while the device is still in Wi-Fi setup mode), or you changed your
+  location from the default, the device sat idle until the 5 minutes ran out. The wait now
+  applies only to retrying the same location after a failure. A new location downloads right
+  away.
+
+### Changed
+
+- **New installs now default to the adsb.lol data source** instead of OpenSky. OpenSky needs
+  credentials, so a new user saw no aircraft and only "SET OPENSKY CREDENTIALS" until they
+  found the SRC setting. Devices that already have a saved source keep it.
+
 ## [v1.3.17] — 2026-11-15
 
 ### Fixed
