@@ -3,6 +3,27 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.19] — 2026-11-17
+
+### Fixed
+
+- **Weather echo disappeared after changing the map range** (#23). A range change queues
+  several background jobs at once (aircraft, map, weather), and the queue holds only four. When
+  it was full, the weather request was silently dropped, and a failed RainViewer lookup was
+  dropped the same way. The echo then stayed gone until you turned the layer off and on. A
+  dropped or failed request is now retried every 5 seconds until it goes through.
+
+- **ECHO slider hard to hit on its right side** (#23). The slider is only 10 px tall, so its
+  touch area is now enlarged by 12 px on every side. Build-verified only; not yet tested on a
+  Panda Touch.
+
+### Added
+
+- **Touch-LCD-7B: two diagnostic controls on the web page** (#25), "Diag DISP (EXIO2)" and
+  "Diag Backlight PWM". After PWR turns the screen off, a tap still does not bring it back.
+  These let a 7B owner switch each backlight signal by hand to find which one fails to
+  recover. They will be removed once the cause is found. PWR itself behaves as in v1.3.18.
+
 ## [v1.3.18] — 2026-11-16
 
 ### Fixed

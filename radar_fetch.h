@@ -132,6 +132,7 @@ inline volatile bool g_route_ready = false;
 #define ECHO_N ((RADAR_CANVAS + ECHO_DS - 1) / ECHO_DS)
 inline uint8_t *g_echo_buf = nullptr;    // 離屏合成緩衝 ECHO_N*ECHO_N*3 (PSRAM)
 inline volatile bool g_echo_ready = false;   // true=g_echo_buf 有整幀待主迴圈換上
+inline volatile bool g_echo_retry = false;   // true=回波請求被丟掉/失敗,主迴圈稍後重排(換比例尺後常撞到佇列滿)
 inline uint8_t g_echo_opa = 100;           // 回波透明度 20~100%,合成時乘上每格 alpha(#23)
 // 回波非透明格的逐列水平範圍(以回波格為單位,x0 > x1 表示該列全透明)。
 // 底圖重建每次都要把回波混進去,降雨通常只佔畫面一小塊、常常甚至整張全空。
@@ -702,7 +703,7 @@ inline void do_echo(const Job &j) {
   int st = 0;
   std::string r = http_req("https://api.rainviewer.com/public/weather-maps.json",
                            false, "", nullptr, "", st);
-  if (st != 200 || r.empty()) { ESP_LOGW("radar_bg", "rainviewer meta %d", st); return; }
+  if (st != 200 || r.empty()) { ESP_LOGW("radar_bg", "rainviewer meta %d", st); g_echo_retry = true; return; }
   std::string host, path;
   esphome::json::parse_json(r, [&](JsonObject root) -> bool {
     host = (const char *) (root["host"] | "");
@@ -711,7 +712,7 @@ inline void do_echo(const Job &j) {
       path = (const char *) (past[past.size() - 1]["path"] | "");
     return true;
   });
-  if (host.empty() || path.empty()) return;
+  if (host.empty() || path.empty()) { g_echo_retry = true; return; }
   float latr = j.lat * 3.14159265f / 180.0f;
   int zbest = -1; float tkm = 0;
   for (int z = 7; z >= 2; z--) {
@@ -913,7 +914,8 @@ inline void request_states(const std::string &cid, const std::string &sec,
 inline void request_echo(float lat, float lon, float range) {
   ensure_task();
   Job *j = new Job{3, "", "", "", lat, lon, range};
-  if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+  // 佇列深度 4:換比例尺時同時會排 states/maps/天氣,回波常被靜默丟掉 → 記起來讓主迴圈重排
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) { delete j; g_echo_retry = true; }
 }
 
 inline void request_maps(float lat, float lon, float range) {

@@ -93,6 +93,8 @@ esphome:
             // 右緣 SYS/PWR 略擴熱區,減輕邊緣觸控偏差(不拉伸全局 calibration)
             lv_obj_set_ext_click_area((lv_obj_t *) id(info_btn), 12);
             lv_obj_set_ext_click_area((lv_obj_t *) id(pwr_btn), 8);
+            // ECHO 滑桿軌只有 10px 高,放大熱區(滑桿在 atc_panel 內,離 SYS/ATC 鈕與其他鈕都夠遠)
+            lv_obj_set_ext_click_area((lv_obj_t *) id(echo_opa_slider), 12);
           }
           // ATC 圖層開關按鈕:還原 NVS 儲存的勾選狀態
           struct { bool on; lv_obj_t *btn, *lbl; } lay[5] = {
@@ -1190,6 +1192,14 @@ interval:
           if (!echo_init && id(echo_on) && millis() > 8000 &&
               wifi::global_wifi_component->is_connected()) {
             echo_init = true;
+            id(echo_refresh).execute();
+          }
+          // 回波請求被丟掉(佇列滿/中繼資料抓失敗)→ 每 5 秒重排一次,直到排進去為止
+          static uint32_t echo_retry_ms = 0;
+          if (radar_bg::g_echo_retry && id(echo_on) && millis() - echo_retry_ms > 5000 &&
+              wifi::global_wifi_component->is_connected()) {
+            echo_retry_ms = millis();
+            radar_bg::g_echo_retry = false;
             id(echo_refresh).execute();
           }
           if (radar_bg::g_echo_ready) {
