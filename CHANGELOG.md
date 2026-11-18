@@ -3,6 +3,17 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.20] — 2026-11-18
+
+### Fixed
+
+- **Touch-LCD-7B screen stayed dark after waking from PWR** (#25, since v1.3.17). The board's
+  IO expander keeps only the last of two commands sent back to back. Turning the screen off
+  worked, but on wake the "display on" command was lost. The firmware now waits at least 20 ms
+  between writes to different registers. Writes to the same register, like dragging the
+  brightness, are not delayed. The two diagnostic controls from v1.3.19 stay until this is
+  confirmed. Build-verified only; not yet tested on a 7B.
+
 ## [v1.3.19] — 2026-11-17
 
 ### Fixed

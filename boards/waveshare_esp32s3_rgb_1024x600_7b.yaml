@@ -174,7 +174,9 @@ number:
 # 原理圖上 DISP(EXIO2)與 EXIO_PWM 同接 AP3032 的 EN,只寫 PWM 255 關不全,
 # 所以 PWR 鍵關燈 = PWM 寫 247 + EXIO2 拉低(output 的 enable_pin,#25)。
 # PWM 不可寫 255:配 EXIO2 拉低後 CH32V003 叫不回背光(v1.3.17 實測);
-# 247 是 ESPHome 官方 waveshare_io_ch32v003 給 7B 的安全上限。擴充晶片的 PWM 是反向的(值越大越暗),
+# 247 是 ESPHome 官方 waveshare_io_ch32v003 給 7B 的安全上限。
+# v1.3.17/18 叫不回的真因:喚醒時 OUTPUT 與 PWM 連寫,CH32V003 吃掉前一筆
+# → ws_ioext 換暫存器時間隔 20ms(v1.3.20,#25)。擴充晶片的 PWM 是反向的(值越大越暗),
 # 已在 ws_ioext.cpp 的 write_state() 處理,這裡不要再加 inverted: true。
 output:
   - platform: ws_ioext

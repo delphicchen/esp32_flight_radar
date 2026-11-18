@@ -59,6 +59,16 @@ void WsIoExtComponent::digital_write(uint8_t pin, bool value) {
 void WsIoExtComponent::write_pwm(uint8_t value) { this->write_reg_(REG_PWM, value); }
 
 bool WsIoExtComponent::write_reg_(uint8_t reg, uint8_t value) {
+  // 7B 實測(#25):連續兩筆寫不同暫存器時,CH32V003 只吃最後一筆。關燈「PWM →
+  // OUTPUT 拉低」生效;喚醒「OUTPUT 拉高 → PWM」的拉高被吃掉,DISP 留在低 → 黑屏。
+  // 隔幾秒手動切 DISP 就正常。換暫存器時至少隔 20ms;同暫存器連寫(拖亮度滑桿)不等。
+  if (reg != this->last_reg_) {
+    uint32_t dt = millis() - this->last_ms_;
+    if (dt < 20)
+      delay(20 - dt);
+  }
+  this->last_reg_ = reg;
+  this->last_ms_ = millis();
   if (this->write_register(reg, &value, 1) != i2c::ERROR_OK) {
     ESP_LOGW(TAG, "write reg 0x%02X failed", reg);
     return false;

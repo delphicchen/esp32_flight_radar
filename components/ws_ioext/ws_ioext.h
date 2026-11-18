@@ -36,6 +36,8 @@ class WsIoExtComponent : public Component, public i2c::I2CDevice {
   void reset_touch_();
   // 晶片只能整個位元組寫入,所以保留一份輸出影子暫存器
   uint8_t output_bits_{0xDF};
+  uint8_t last_reg_{0xFF};   // 上一筆寫入的暫存器(write_reg_ 用來隔開不同暫存器的連續寫入)
+  uint32_t last_ms_{0};
   uint8_t touch_rst_{};
   InternalGPIOPin *touch_int_{nullptr};
 };
