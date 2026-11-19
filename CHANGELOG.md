@@ -3,6 +3,23 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.3.21] — 2026-11-19
+
+### Fixed
+
+- **Local weather never retried after a failure** (#23). Temperature, humidity and wind come from
+  Open-Meteo. Like the rain echo in v1.3.19, a weather request was silently dropped when the
+  background queue was full, and a failed connection was not retried. The next try then waited the
+  full 10 minutes, so the display could show old values for a long time. A dropped or failed
+  weather request is now retried after 1 minute. If the connection to Open-Meteo itself keeps
+  failing, that comes from the network path and is not changed here.
+
+### Removed
+
+- **Touch-LCD-7B diagnostic web controls** ("Diag DISP (EXIO2)" and "Diag Backlight PWM"). They
+  were added in v1.3.19 only to find the dark-screen cause. The v1.3.20 wake fix is now confirmed
+  on a real 7B, so they are no longer needed.
+
 ## [v1.3.20] — 2026-11-18
 
 ### Fixed

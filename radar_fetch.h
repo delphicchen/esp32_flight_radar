@@ -148,6 +148,7 @@ inline volatile bool g_auth_fail = false;
 struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
 inline WxInfo g_wx;
 inline volatile bool g_wx_ready = false;   // true=g_wx 有新資料待主迴圈取用
+inline volatile bool g_wx_retry = false;   // true=天氣請求被丟掉/連線失敗,主迴圈 1 分鐘後重抓(不等 10 分鐘,#23)
 inline bool g_wx_valid = false;            // 曾成功抓過至少一次
 // 時區 AUTO:天氣請求順便帶 timezone=auto,Open-Meteo 依座標回 IANA 名稱 → 查 tz_db.h
 // 轉 POSIX。g_tz_new 是背景 task 交給主迴圈的(g_tz_ready 當柵欄);
@@ -563,6 +564,7 @@ inline void do_weather(const Job &j) {
   std::string r = http_req(url, false, "", nullptr, "", st);
   if (st != 200 || r.empty()) {
     ESP_LOGW("radar_bg", "weather failed: %d", st);
+    g_wx_retry = true;
     return;
   }
   WxInfo w{};
@@ -928,7 +930,7 @@ inline void request_maps(float lat, float lon, float range) {
 inline void request_weather(float lat, float lon) {
   ensure_task();
   Job *j = new Job{4, "", "", "", lat, lon, 0};
-  if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) { delete j; g_wx_retry = true; }
 }
 
 inline void request_speakers(const std::string &url, const std::string &token) {

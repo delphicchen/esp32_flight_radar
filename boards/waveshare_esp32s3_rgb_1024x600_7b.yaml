@@ -138,36 +138,6 @@ switch:
       ws_ioext: io_ex
       number: 4
 
-  # ---- #25 診斷用:PWR 關燈後叫不回背光,手上沒有 7B,請使用者在網頁上手動試 ----
-  # 直接寫 EXIO2(DISP),不經 bl_pwm 的 enable 狀態。只在網頁出現(diagnostic),
-  # 查完原因後移除。
-  - platform: template
-    id: diag_disp
-    name: "Diag DISP (EXIO2)"
-    entity_category: diagnostic
-    optimistic: true
-    restore_mode: ALWAYS_ON
-    turn_on_action:
-      - lambda: 'id(io_ex)->digital_write(2, true);'
-    turn_off_action:
-      - lambda: 'id(io_ex)->digital_write(2, false);'
-
-number:
-  # #25 診斷:直接寫背光 PWM 暫存器(0 = 最亮,255 = 最暗;反向)
-  - platform: template
-    id: diag_bl_pwm
-    name: "Diag Backlight PWM"
-    entity_category: diagnostic
-    optimistic: true
-    min_value: 0
-    max_value: 255
-    step: 1
-    initial_value: 0
-    restore_value: false
-    mode: box
-    set_action:
-      - lambda: 'id(io_ex)->write_pwm((uint8_t) x);'
-
 # ---- Backlight ----
 # EXIO2 是背光 enable(開機由下方 display 的 enable_pin 拉高),亮度由
 # 擴充晶片的 PWM 暫存器控制 → 與通用板一樣用 monochromatic light。

@@ -1271,6 +1271,11 @@ interval:
             xSemaphoreGive(radar_bg::mtx());
           }
           // 在地天氣:開機 8 秒後首抓,之後每 10 分鐘;座標變更時 wx_last_ms 歸零強制重抓
+          // 失敗(連線失敗/佇列滿)→ 把上次時間往回撥,1 分鐘後重抓,不必乾等 10 分鐘(#23)
+          if (radar_bg::g_wx_retry) {
+            radar_bg::g_wx_retry = false;
+            id(wx_last_ms) = millis() - 540000;
+          }
           if (millis() > 8000 && wifi::global_wifi_component->is_connected() &&
               (id(wx_last_ms) == 0 || millis() - id(wx_last_ms) > 600000)) {
             id(wx_last_ms) = millis();
