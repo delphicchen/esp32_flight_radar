@@ -18,6 +18,7 @@ esphome:
       - "-DSCREEN_W=${disp_w}"
       - "-DSCREEN_H=${disp_h}"
       - "-DRADAR_CANVAS=${radar_canvas}"
+      - "-DSHUB_I2C_PROBE_38=1"    # #24 這條匯流排上沒有 0x38 的裝置,可以探測 AHT20
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -63,6 +64,7 @@ light:
 
 # ---- 觸控 Touch (GT911, I2C) ----
 i2c:
+  id: sens_i2c                  # #24 I2C 感測器也掛這條(sensors_i2c.h)
   sda: GPIO16                   # GT911 SDA
   scl: GPIO15                   # GT911 SCL
   frequency: 400kHz

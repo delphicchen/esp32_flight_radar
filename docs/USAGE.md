@@ -12,7 +12,7 @@ Assistant,以及在台灣以外地區使用。
 ## English
 ## Alarm clock
 
-- Tap the **clock** to open the alarm page (4 slots). For each: enable, tap the time to open a large scroll-wheel time picker, choose the weekdays, and (optionally) pick that alarm's own speaker from the dropdown at the end of its row.
+- Tap the **clock**, then **ALARM**, to open the alarm page (4 slots; on the P4, tapping the clock opens it directly). For each: enable, tap the time to open a large scroll-wheel time picker, choose the weekdays, and (optionally) pick that alarm's own speaker from the dropdown at the end of its row.
 - In the config fields set **Alarm Speaker** (a Home Assistant `media_player` entity, e.g. `media_player.living_room`) and optionally **Alarm Sound URL** (an mp3).
 - In Home Assistant, open the device page and enable **"Allow the device to perform Home Assistant actions."** Otherwise the ESP32 cannot command the speaker.
 - When an alarm fires, a **SNOOZE 9m / DISMISS** panel appears on screen. The sound **re-plays every 15 s until you press DISMISS**, so a short mp3 still keeps ringing.
@@ -57,6 +57,50 @@ Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = t
 > **Security note:** a long-lived token grants full access to your Home Assistant and is stored in the device's flash. Treat it like a password and keep the device on a trusted network — the firmware only uses it for this read-only speaker query.
 >
 > Worth knowing: ESPHome's `web_server` returns the raw value of a `mode: password` text entity in the JSON `value` field even though it masks `state`, and the web server has no authentication. Anyone on your LAN can therefore read the token from `http://<device>/events`. This is an upstream ESPHome issue, present in 2026.8.1. If your network is not one you trust, leave the token unset and type the speaker entity ids by hand instead.
+
+## Clock & sensor page
+
+S3 boards from v1.4.0. The P4 (lvgl9 branch) does not have it yet; there, tapping the clock still
+opens the alarm page.
+
+- **Open it:** tap the clock on the radar page. Tap the big clock again, or **RADAR**, to go back.
+  **ALARM** opens the alarm page, and **PWR** turns the screen off (touch to wake).
+- **Cards:** each card shows a name, a source tag, the value, MAX/MIN and a curve. One point is
+  recorded every minute and kept for 24 hours in RAM, so a reboot starts the curves empty. The
+  curve covers the data collected so far: from 1 hour up to 24 hours (the label in the
+  bottom-left shows the span). A value that has not updated for 30 minutes shows `--`.
+- **How many cards:** **GRID** cycles AUTO / 1 / 2 / 3 / 4 / 6 (also *Sensor Grid* in the web UI).
+  AUTO shows one card per available value, up to 6.
+- **What each card shows:** tap the card's ⚙. AUTO fills cards in this order: outdoor weather,
+  I²C sensors, then Home Assistant sensors. Pick a value to pin it to that card. The web UI
+  has the same choice as *Sensor Slot 1–6*.
+- **Sources**
+  - **Outdoor** temperature and humidity come from the local weather (Open-Meteo).
+  - **I²C sensors** are detected at boot, so nothing has to be configured:
+
+    | Address | Chip | Values |
+    |---|---|---|
+    | 0x38 | AHT20 | temperature, humidity (not on Waveshare boards, see below) |
+    | 0x44 / 0x45 | SHT3x / SHT4x | temperature, humidity |
+    | 0x76 / 0x77 | BME280 / BMP280 | temperature, humidity (BME280), pressure |
+    | 0x62 | SCD40 / SCD41 | CO2 |
+
+    Connect them to the touch I²C bus. The Panda Touch is the exception: use its expansion port
+    P2 (SDA1 GPIO4, SCL1 GPIO3, 3V3, GND). Many modules are wired VCC/GND/SCL/SDA, so check
+    the pin order. On the Waveshare boards, 0x38 is used by the IO expander, so an AHT20
+    cannot be used there. The web UI shows what was found as *I2C Sensors* (e.g. `SHT4x@44 BME280@76`) and
+    the values as *Indoor Temperature / Humidity / Pressure / CO2*. When several chips measure the
+    same thing, SHT/AHT is preferred over BME/BMP, and the SCD4x's own temperature is used only if
+    nothing else measures it.
+  - **Home Assistant sensors** need *HA URL* and *HA Token* (see Alarm clock). Tap ⚙ →
+    **HA SENSORS ...**, pick a category (temperature, humidity, CO2, PM, pressure, power,
+    energy, battery, illuminance, other, or all), then a sensor. The list shows numeric sensors
+    with a unit, 30 per page. Sensors without a device class are sorted by their unit. Up to 4 HA sensors can be in use; they are
+    stored as *HA Sensor 1–4* in the web UI and refreshed every 15 seconds.
+- **Thresholds and colors:** ⚙ → **ALERT ...** sets a HIGH and a LOW limit (− / +, hold to
+  repeat, OFF to clear) and the color for normal, above HIGH and below LOW. Outside the limits
+  the value, the curve and the card border change color. Nothing sounds and the screen does not
+  wake. The setting follows the value, not the card. CO2 starts with HIGH 1200 in red.
 
 ## Aircraft type silhouettes and specs
 
@@ -121,7 +165,7 @@ coordinates on first boot, from [flight-radar-maps](https://github.com/delphicch
 and stores them in flash. A prebuilt image works anywhere; the screen shows
 `DOWNLOADING MAP` under the callsign while it fetches.
 
-**Set your timezone, though** — the clock defaults to Taipei. Tap the clock and pick it under
+**Set your timezone, though** — the clock defaults to Taipei. Tap the clock, then **ALARM**, and pick it under
 **TIMEZONE** at the bottom of the alarm page, or use *Timezone* in the web UI. The easiest
 choice is **AUTO (BY LOCATION)**: the timezone is looked up from your coordinates (with the local
 weather, every 10 minutes) and daylight saving switches by itself — there is no separate DST
@@ -190,7 +234,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 ## 中文
 ## 鬧鐘
 
-- 點**時鐘**開啟鬧鐘頁(4 組)。每組:啟用、點時間彈出大型捲輪選擇器設定時 / 分、選擇星期幾,列尾的下拉選單可(選擇性)指定該組專屬喇叭。
+- 點**時鐘**再點 **ALARM** 開啟鬧鐘頁(4 組;P4 點時鐘直接進入)。每組:啟用、點時間彈出大型捲輪選擇器設定時 / 分、選擇星期幾,列尾的下拉選單可(選擇性)指定該組專屬喇叭。
 - 在設定欄位填入 **Alarm Speaker**(Home Assistant 的 `media_player` 實體,例如 `media_player.living_room`),以及可選的 **Alarm Sound URL**(mp3)。
 - 在 Home Assistant 的裝置頁開啟「**允許此裝置執行 Home Assistant 動作**」,否則 ESP32 無法命令喇叭。
 - 鬧鐘響時,螢幕會出現 **SNOOZE 9m / DISMISS** 面板。聲音會**每 15 秒重播一次,直到你按下 DISMISS**,所以短音檔也能持續響。
@@ -235,6 +279,42 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 > **安全性提醒:**長期權杖等同 HA 的完整存取權,且儲存在裝置 flash 中。請把它當密碼看待、讓裝置留在信任的內網;韌體只會用它做這個唯讀的喇叭查詢。
 >
 > 另外要知道:ESPHome 的 `web_server` 雖然把 `mode: password` 文字實體的 `state` 遮罩掉,卻仍以原文輸出 JSON 的 `value` 欄位,而網頁伺服器預設沒有認證。因此**同一區網上的任何人都能從 `http://<裝置>/events` 讀到這個權杖**。這是 ESPHome 上游的問題,2026.8.1 仍存在。若你的網路環境不完全可信,請不要設定權杖,改用手動輸入喇叭實體 id。
+
+## 時鐘/感測器頁
+
+S3 板子從 v1.4.0 起提供。P4(lvgl9 分支)還沒有這一頁,點時鐘仍然是進鬧鐘頁。
+
+- **進入:** 在雷達頁點時鐘。點大時鐘或 **RADAR** 回雷達。**ALARM** 進鬧鐘頁,**PWR** 關螢幕(觸控喚醒)。
+- **卡片:** 每張卡片顯示名稱、來源標籤、數值、MAX/MIN 和曲線。每分鐘記一點,在 RAM 裡保留
+  24 小時,重開機會從空的開始。曲線涵蓋目前已有的資料,範圍 1 到 24 小時(左下角標示)。
+  超過 30 分鐘沒更新的數值顯示 `--`。
+- **卡片數量:** **GRID** 依序切換 AUTO / 1 / 2 / 3 / 4 / 6(網頁介面的 *Sensor Grid* 也能改)。
+  AUTO 依目前有的數值決定,最多 6 張。
+- **每張卡片顯示什麼:** 點卡片的 ⚙。AUTO 依序填入室外天氣、I²C 感測器、Home Assistant 感測器;
+  選定某個數值就固定在那一格。網頁介面的 *Sensor Slot 1–6* 是同一個設定。
+- **資料來源**
+  - **室外**溫濕度來自在地天氣(Open-Meteo)。
+  - **I²C 感測器**開機自動偵測,不用設定:
+
+    | 位址 | 晶片 | 數值 |
+    |---|---|---|
+    | 0x38 | AHT20 | 溫度、濕度(Waveshare 板子不支援,見下方) |
+    | 0x44 / 0x45 | SHT3x / SHT4x | 溫度、濕度 |
+    | 0x76 / 0x77 | BME280 / BMP280 | 溫度、濕度(BME280)、氣壓 |
+    | 0x62 | SCD40 / SCD41 | CO2 |
+
+    接在觸控那條 I²C 上。Panda Touch 例外,請接擴充座 P2(SDA1 GPIO4、SCL1 GPIO3、3V3、GND)。
+    很多模組的腳序是 VCC/GND/SCL/SDA,接線前先對一下。Waveshare 板上的 IO 擴充晶片佔用 0x38,
+    所以不能用 AHT20。網頁介面的 *I2C Sensors* 顯示偵測結果(例:`SHT4x@44 BME280@76`),數值在
+    *Indoor Temperature / Humidity / Pressure / CO2*。同一種量有多顆晶片時,SHT/AHT 優先於
+    BME/BMP;SCD4x 自己量的溫濕度只在沒有其他來源時才用。
+  - **Home Assistant 感測器**需要填 *HA URL* 和 *HA Token*(見「鬧鐘」)。點 ⚙ → **HA SENSORS ...**,
+    先選類別(溫度、濕度、CO2、PM、氣壓、功率、電能、電量、照度、其他或全部),再選感測器。
+    清單列出有單位的數值感測器,每頁 30 筆;沒有 device class 的依單位分類。最多同時用 4 個,存在網頁介面的
+    *HA Sensor 1–4*,每 15 秒更新一次。
+- **門檻與顏色:** ⚙ → **ALERT ...** 設定上限 HIGH 和下限 LOW(− / +,按住連續調,OFF 取消),
+  以及正常、超過上限、低於下限各自的顏色。超出範圍時,數值、曲線和卡片外框會換色,不會發聲也不會
+  亮屏。設定跟著數值走,不跟著格子。CO2 預設上限 1200、紅色。
 
 ## 機型輪廓與規格
 
@@ -298,7 +378,7 @@ automation:
 [flight-radar-maps](https://github.com/delphicchen/flight-radar-maps) 下載對應的圖磚存進 flash,
 預編韌體在任何地方都能用;抓取期間呼號下方會顯示 `DOWNLOADING MAP`。
 
-**但時區要自己設** —— 時鐘預設台北時間。點時鐘,在鬧鐘頁最下方的 **TIMEZONE** 選擇,
+**但時區要自己設** —— 時鐘預設台北時間。點時鐘再點 **ALARM**,在鬧鐘頁最下方的 **TIMEZONE** 選擇,
 或在網頁介面的 *Timezone* 改。最省事是選 **AUTO (BY LOCATION)**:依你的座標查時區(隨在地天氣
 每 10 分鐘更新),日光節約自動切換 —— 沒有另外的日光節約開關,清單上的城市也都會自動切換。
 不然就選同時區的城市(例:羅馬、馬德里 → PARIS 或 BERLIN)。

@@ -16,6 +16,7 @@ substitutions:
   f_clock: "64"
   f_mono: "18"
   f_tiny: "14"
+  f_value: "46"     # #24 感測器卡片大數字
   # 螢幕方向:兩個值必須成對修改
   #   正立: disp_rotation "0°"   + touch_mirror "false"
   #   倒轉: disp_rotation "180°" + touch_mirror "true"

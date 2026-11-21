@@ -113,7 +113,7 @@ struct AcInfo {
 struct Job {
   int type;  // 1 = states, 2 = route, 3 = echo, 4 = weather, 5 = speakers,
              // 6 = route cache, 7 = 機型查詢(callsign 欄放 ICAO24 十六進位字串),
-             // 8 = 下載地圖圖磚
+             // 8 = 下載地圖圖磚,9 = HA 感測器清單(#24),10 = HA 感測器數值(callsign 欄放逗號分隔的 entity_id)
   std::string cid, sec, callsign;
   float lat, lon, range;
   int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
@@ -157,6 +157,12 @@ inline std::string g_tz_new;
 inline volatile bool g_tz_ready = false;
 inline std::string g_tz_auto;
 inline std::string g_speakers;             // HA 喇叭清單:每行 entity_id|friendly_name
+// #24 時鐘頁 HA 感測器:清單(挑選用)與數值(每 60 秒),格式皆為每行 entity_id|name|unit|state
+inline std::string g_ha_list;
+inline int g_ha_list_status = 0;
+inline volatile bool g_ha_list_ready = false;
+inline std::string g_ha_vals;
+inline volatile bool g_ha_vals_ready = false;
 inline volatile bool g_speakers_ready = false;
 inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token 錯 / <=0 連不上
 
@@ -628,6 +634,55 @@ inline void do_speakers(const Job &j) {
   xSemaphoreGive(mtx());
 }
 
+// #24 HA 感測器清單:模板在 HA 端過濾(有單位、數值是數字),依名稱排序最多 400 個(裝置端分頁顯示)
+inline void do_ha_list(const Job &j) {
+  std::string url = j.cid;
+  while (!url.empty() && url.back() == '/') url.pop_back();
+  url += "/api/template";
+  std::string body =
+      "{\"template\":\"{% set ns = namespace(n=0) %}"
+      "{% for e in states.sensor | sort(attribute='name') %}"
+      "{% if ns.n < 400 and e.state | is_number and e.attributes.unit_of_measurement is defined %}"
+      "{% set ns.n = ns.n + 1 %}"
+      "{{ e.entity_id }}|{{ e.name | replace('|','/') }}|{{ e.attributes.unit_of_measurement }}|{{ e.state }}|{{ e.attributes.device_class | default('') }}\\n"
+      "{% endif %}{% endfor %}\"}";
+  int st = 0;
+  std::string r = http_req(url, true, body, "application/json", j.sec, st);
+  ESP_LOGI("radar_bg", "ha list http %d (%u bytes)", st, (unsigned) r.size());
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_ha_list_status = st;
+  g_ha_list = (st == 200) ? r : "";
+  g_ha_list_ready = true;
+  xSemaphoreGive(mtx());
+}
+
+// #24 選定的 HA 感測器數值(最多 4 個,一次請求)
+inline void do_ha_vals(const Job &j) {
+  std::string url = j.cid;
+  while (!url.empty() && url.back() == '/') url.pop_back();
+  url += "/api/template";
+  std::string ids;   // 'a','b' —— entity_id 只含 [a-z0-9_.],呼叫端已過濾
+  size_t p = 0;
+  while (p <= j.callsign.size()) {
+    size_t q = j.callsign.find(',', p);
+    if (q == std::string::npos) q = j.callsign.size();
+    if (q > p) { if (!ids.empty()) ids += ","; ids += "'" + j.callsign.substr(p, q - p) + "'"; }
+    p = q + 1;
+  }
+  if (ids.empty()) return;
+  std::string body =
+      "{\"template\":\"{% for i in [" + ids + "] %}"
+      "{{ i }}|{{ (state_attr(i,'friendly_name') or i) | replace('|','/') }}|"
+      "{{ state_attr(i,'unit_of_measurement') or '' }}|{{ states(i) }}\\n{% endfor %}\"}";
+  int st = 0;
+  std::string r = http_req(url, true, body, "application/json", j.sec, st);
+  if (st != 200) ESP_LOGW("radar_bg", "ha vals http %d", st);
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_ha_vals = (st == 200) ? r : "";
+  g_ha_vals_ready = (st == 200);
+  xSemaphoreGive(mtx());
+}
+
 // ---- pngle 解碼 context:tile 像素解出來就直接寫進 g_echo_buf ----
 // 原本先把整塊 tile 解進 512x512 RGBA 暫存(1MB PSRAM)再逐格取樣。改成事先算好
 // 「tile 第 tx 欄 / 第 ty 列覆蓋哪幾個回波格」,解碼回呼查表直接寫,省掉暫存;
@@ -890,6 +945,8 @@ inline void task_fn(void *arg) {
       else if (j->type == 4) do_weather(*j);
       else if (j->type == 5) do_speakers(*j);
       else if (j->type == 8) do_maps(*j);
+      else if (j->type == 9) do_ha_list(*j);
+      else if (j->type == 10) do_ha_vals(*j);
       delete j;
     }
   }
@@ -937,6 +994,26 @@ inline void request_speakers(const std::string &url, const std::string &token) {
   ensure_task();
   Job *j = new Job{5, url, token, "", 0, 0, 0};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;
+}
+
+inline void request_ha_list(const std::string &url, const std::string &token) {
+  ensure_task();
+  Job *j = new Job{9, url, token, "", 0, 0, 0};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) {
+    delete j;
+    xSemaphoreTake(mtx(), portMAX_DELAY);
+    g_ha_list_status = -2;   // 佇列滿:讓畫面顯示失敗,不要一直 LOADING
+    g_ha_list = "";
+    g_ha_list_ready = true;
+    xSemaphoreGive(mtx());
+  }
+}
+
+inline void request_ha_vals(const std::string &url, const std::string &token, const std::string &ids) {
+  if (ids.empty()) return;
+  ensure_task();
+  Job *j = new Job{10, url, token, ids, 0, 0, 0};
+  if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;   // 下一輪(60 秒)再抓
 }
 
 inline void request_route(const std::string &cs) {
@@ -1158,6 +1235,10 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
   if (echo_show && radar_bg::g_echo_buf) {
     const uint16_t eopa = radar_bg::g_echo_opa;   // 使用者設的回波透明度(%)
     lv_color_t *rows = (lv_color_t *) (void *) img->data;
+    // 地圖輪廓蓋在回波上(#23:大雨把海岸線整片蓋掉):混色後與快取(底色+輪廓)
+    // 逐通道取亮者。暗底色幾乎不影響回波,亮黃輪廓則穿透出來;反鋸齒邊緣較暗,
+    // 取亮者不會在雨區留下黑邊。快取配置失敗就維持舊行為。
+    const lv_color_t *outl = (map_show && cache) ? (const lv_color_t *) (const void *) cache : nullptr;
     for (int y = 0; y < RADAR_CANVAS; y++) {
       const int ey = y / ECHO_DS;
       const int xa = radar_bg::g_echo_x0[ey], xb = radar_bg::g_echo_x1[ey];
@@ -1171,7 +1252,14 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         if (sp[2] < 8) continue;   // 區段內的空隙,保留底圖
         lv_color_t fg;
         fg.full = (uint16_t) sp[0] | ((uint16_t) sp[1] << 8);
-        *dst = lv_color_mix(fg, *dst, (lv_opa_t) (sp[2] * eopa / 100));
+        lv_color_t m = lv_color_mix(fg, *dst, (lv_opa_t) (sp[2] * eopa / 100));
+        if (outl) {
+          const lv_color_t o = outl[(size_t) y * RADAR_CANVAS + x];
+          if (LV_COLOR_GET_R(o) > LV_COLOR_GET_R(m)) LV_COLOR_SET_R(m, LV_COLOR_GET_R(o));
+          if (LV_COLOR_GET_G(o) > LV_COLOR_GET_G(m)) LV_COLOR_SET_G(m, LV_COLOR_GET_G(o));
+          if (LV_COLOR_GET_B(o) > LV_COLOR_GET_B(m)) LV_COLOR_SET_B(m, LV_COLOR_GET_B(o));
+        }
+        *dst = m;
       }
     }
   }

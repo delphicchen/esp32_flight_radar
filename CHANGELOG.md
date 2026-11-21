@@ -3,6 +3,32 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.4.0] — 2026-11-21
+
+### Added
+
+- **Clock & sensor page** (#24, S3 boards). Tapping the clock now opens a full-screen clock with
+  up to 6 sensor cards below it, each with its value, MAX/MIN and a 24-hour curve. **The alarm page
+  moved behind the page's ALARM button.** The P4 is unchanged.
+  - Sources: outdoor temperature/humidity from the local weather; I²C sensors detected at boot
+    (AHT20, SHT3x/SHT4x, BME280/BMP280, SCD40/41); and up to 4 Home Assistant sensors picked from
+    an on-screen list grouped by category, refreshed every 15 s.
+  - Card count is automatic or set with GRID / *Sensor Grid*. Each card's ⚙ chooses its value
+    (also *Sensor Slot 1–6* in the web UI) and sets HIGH/LOW thresholds with their own colors.
+  - New web/HA entities: *I2C Sensors*, *Indoor Temperature / Humidity / Pressure / CO2*,
+    *HA Sensor 1–4*, *Sensor Grid*, *Sensor Slot 1–6*.
+  - Panda Touch: sensors go on the expansion port P2 (GPIO4/3), a separate I²C bus. Its unused
+    display VSYNC placeholder moved off GPIO4 to make room.
+  - Waveshare boards do not probe 0x38 (their IO expander uses it), so the AHT20 is not
+    supported there.
+
+### Changed
+
+- **MAP and ECHO are on after a fresh flash** (#23). Both used to start off, so a new device showed
+  an empty radar until you found the buttons. Devices that already saved a choice keep it.
+- **Map outlines stay visible under heavy rain** (#23). The rain echo used to paint over the
+  coastlines and borders. The outlines now show through the echo at any ECHO opacity.
+
 ## [v1.3.21] — 2026-11-19
 
 ### Fixed

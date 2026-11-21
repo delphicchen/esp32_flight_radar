@@ -114,6 +114,7 @@ psram:
 
 # ---- IO expander (LCD reset/enable, backlight, touch reset) ----
 i2c:
+  id: sens_i2c                  # #24 I2C 感測器也掛這條(sensors_i2c.h)
   sda: GPIO8                    # GT911 + IO 擴充 SDA
   scl: GPIO9                    # GT911 + IO 擴充 SCL
   frequency: 400kHz

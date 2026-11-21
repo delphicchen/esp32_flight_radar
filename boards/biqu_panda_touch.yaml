@@ -20,6 +20,7 @@ esphome:
       - "-DSCREEN_W=${disp_w}"
       - "-DSCREEN_H=${disp_h}"
       - "-DRADAR_CANVAS=${radar_canvas}"
+      - "-DSHUB_I2C_PROBE_38=1"    # #24 外接 I2C1 上沒有 0x38 的裝置,可以探測 AHT20
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -68,14 +69,22 @@ light:
 
 # ---- 觸控 Touch (GT911, I2C) ----
 i2c:
-  sda: GPIO2                    # GT911 SDA
-  scl: GPIO1                    # GT911 SCL
-  frequency: 400kHz
+  - id: touch_i2c
+    sda: GPIO2                  # GT911 SDA
+    scl: GPIO1                  # GT911 SCL
+    frequency: 400kHz
+  # #24 擴充座 P2 = I²C1,腳序 SDA1(GPIO4) / SCL1(GPIO3) / 3V3 / GND;
+  # 感測器自動偵測走這條(sensors_i2c.h),和觸控分開
+  - id: sens_i2c
+    sda: GPIO4
+    scl: GPIO3
+    frequency: 100kHz
 
 touchscreen:
   - platform: gt911
     id: my_touch
     display: main_display
+    i2c_id: touch_i2c
     address: 0x5D
     interrupt_pin: GPIO40
     reset_pin: GPIO41
@@ -120,7 +129,8 @@ touchscreen:
 #   H_total = 800+4+8+8 = 820 ; V_total = 480+4+16+16 = 516
 #   23 MHz → 54.4 Hz;掃描頻寬約 42 MB/s(與 5B 相同,120MHz octal 餵得動)
 # rpi_dpi_rgb 的 hsync_pin/vsync_pin 是必填,而這片面板是 DE-only、兩支腳都沒接:
-# 指定主機板上沒用到的 GPIO42 / GPIO4(擴充座 SDA1,韌體未使用)當佔位,面板收不到訊號。
+# 兩支都指定主機板上沒用到的 GPIO42 當佔位,面板收不到訊號。
+# (原本 vsync 佔 GPIO4,#24 起 GPIO4 是擴充座 I²C1 的 SDA1,所以改成共用 GPIO42)
 display:
   - platform: rpi_dpi_rgb
     id: main_display
@@ -135,8 +145,12 @@ display:
       height: ${disp_h}
     reset_pin: GPIO46           # 面板 reset,放開前畫面不會動
     de_pin: GPIO38              # data enable
-    hsync_pin: GPIO42           # 佔位,未接線(見上)
-    vsync_pin: GPIO4            # 佔位,未接線(見上)
+    hsync_pin:
+      number: GPIO42            # 佔位,未接線(見上)
+      allow_other_uses: true
+    vsync_pin:
+      number: GPIO42            # 佔位,與 hsync 共用(見上)
+      allow_other_uses: true
     pclk_pin: GPIO5             # pixel clock
     hsync_pulse_width: 4
     hsync_back_porch: 8

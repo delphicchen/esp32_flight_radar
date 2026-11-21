@@ -36,6 +36,7 @@ esphome:
       - "-DSCREEN_W=${disp_w}"
       - "-DSCREEN_H=${disp_h}"
       - "-DRADAR_CANVAS=${radar_canvas}"
+      - "-DSHUB_I2C_PROBE_38=1"    # #24 這條匯流排上沒有 0x38 的裝置,可以探測 AHT20
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -109,6 +110,7 @@ light:
 # 注意 SDA/SCL 佔用 GPIO19/20 —— 那是 ESP32-S3 的 USB D-/D+,所以這片板子
 # 不能用內建 USB-Serial-JTAG 燒錄/看 log,要走板上的 UART 橋接器(type-C 那顆)。
 i2c:
+  id: sens_i2c                  # #24 I2C 感測器也掛這條(sensors_i2c.h)
   sda: GPIO19                   # GT911 SDA (= USB D-)
   scl: GPIO20                   # GT911 SCL (= USB D+)
   frequency: 400kHz
