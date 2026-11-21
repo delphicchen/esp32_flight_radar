@@ -49,6 +49,8 @@ esphome:
     - radar_fetch.h
     - alarm.h
     - track_hist.h         # #22 選中航班的完整航跡歷史
+    - sensors_hub.h        # #24 時鐘/感測器頁:數值登記 + 24h 曲線 + 卡片排版
+    - sensors_i2c.h        # #24 I2C 本地感測器自動偵測(匯流排 id: sens_i2c,見各板檔)
   on_boot:
     priority: -100
     then:
@@ -75,6 +77,76 @@ esphome:
           id(rtc_time).set_timezone(radar_bg::tz_posix(id(tz_sel)));
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           id(tz_select).publish_state((size_t) id(tz_sel));   // 網頁的 Timezone 也同步
+          // #24 時鐘頁:NVS 的格數/各格指定 → 執行期陣列 + 網頁下拉,並建立卡片
+          {
+            int P[6] = { id(shub_p0), id(shub_p1), id(shub_p2), id(shub_p3), id(shub_p4), id(shub_p5) };
+            select::Select *SS[6] = { id(shub_slot0_sel), id(shub_slot1_sel), id(shub_slot2_sel),
+                                      id(shub_slot3_sel), id(shub_slot4_sel), id(shub_slot5_sel) };
+            id(shub_pin).assign(6, 0);
+            for (int i = 0; i < 6; i++) {
+              if (P[i] < 0 || P[i] > 10) P[i] = 0;
+              id(shub_pin)[i] = P[i];
+              SS[i]->publish_state((size_t) P[i]);
+            }
+            static const int M[6] = {0, 1, 2, 3, 4, 6};
+            int mi = 0;
+            for (int i = 0; i < 6; i++) if (M[i] == id(shub_mode)) mi = i;
+            id(shub_mode) = M[mi];
+            id(shub_grid_sel)->publish_state((size_t) mi);
+            shub::build(id(clock_page)->obj, ${disp_w}, ${disp_h},
+                        lv_obj_get_style_text_font(id(cp_date_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_valfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_tinyfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(wifi_icon), LV_PART_MAIN));   // Montserrat:齒輪符號
+            // 卡片齒輪選單選定 → 走該格 select 的 set_action(寫 NVS、同步網頁、重排)
+            shub::g_on_pick = [](int slot, int val) {
+              select::Select *SS[6] = { id(shub_slot0_sel), id(shub_slot1_sel), id(shub_slot2_sel),
+                                        id(shub_slot3_sel), id(shub_slot4_sel), id(shub_slot5_sel) };
+              if (slot < 0 || slot >= 6) return;
+              auto call = SS[slot]->make_call();
+              call.set_index((size_t) val);
+              call.perform();
+            };
+            // HA SENSORS:發清單請求
+            shub::g_ha_enabled = !id(ha_token).state.empty();
+            shub::g_on_ha_list_req = []() {
+              std::string url = id(ha_url).state;
+              if (url.empty()) url = "http://homeassistant.local:8123";
+              radar_bg::request_ha_list(url, id(ha_token).state);
+            };
+            // 挑好 HA 實體 → 放進 HA 1~4(同一實體沿用;該格原本就是 HA k 就換掉它;
+            // 否則找空位,再不然找沒有任何格指定的)→ 該格指定成它 → 立刻抓值
+            shub::g_on_ha_pick = [](int slot, const shub::HaEnt &e) {
+              text::Text *T[4] = { id(ha_sens0), id(ha_sens1), id(ha_sens2), id(ha_sens3) };
+              auto &pin = id(shub_pin);
+              // 某個 HA k 是否被「別的格」用著(手動指定或 AUTO 正在顯示)
+              auto busy = [&](int i) {
+                for (int s = 0; s < 6; s++)
+                  if (s != slot && (pin[s] == 1 + shub::HA1 + i || shub::g_slot_key[s] == shub::HA1 + i)) return true;
+                return false;
+              };
+              int k = -1;
+              for (int i = 0; i < 4 && k < 0; i++) if (T[i]->state == e.id) k = i;   // 同一實體:沿用
+              // 這格原本就是 HA k、且沒有別格共用 → 直接換掉(有共用就不能換,否則另一格跟著變)
+              if (k < 0 && pin[slot] >= 1 + shub::HA1 && pin[slot] <= 1 + shub::HA4 && !busy(pin[slot] - 1 - shub::HA1))
+                k = pin[slot] - 1 - shub::HA1;
+              for (int i = 0; i < 4 && k < 0; i++) if (T[i]->state.empty()) k = i;
+              for (int i = 0; i < 4 && k < 0; i++) if (!busy(i)) k = i;
+              if (k < 0 && pin[slot] >= 1 + shub::HA1 && pin[slot] <= 1 + shub::HA4) k = pin[slot] - 1 - shub::HA1;
+              if (k < 0) k = 0;
+              if (T[k]->state != e.id) {
+                auto tc = T[k]->make_call();
+                tc.set_value(e.id);
+                tc.perform();   // on_value 會清掉舊資料並觸發抓值
+                shub::alert_reset(shub::HA1 + k);   // 換了感測器,舊門檻不適用
+              }
+              // 先用清單裡的值顯示,不必等下一輪
+              shub::Key key = (shub::Key) (shub::HA1 + k);
+              shub::describe(key, e.name.c_str(), "HA", e.unit.c_str(), shub::decimals_of(e.state));
+              shub::set(key, strtof(e.state.c_str(), nullptr));
+              shub::g_on_pick(slot, 1 + shub::HA1 + k);
+            };
+          }
           // 鎖定所有頁面的捲動:避免三指截圖手勢把頁面拖出位移,截到偏移後的內容
           lv_obj_t *pgs[4] = { id(main_page)->obj, id(alarm_page)->obj,
                                id(config_page)->obj, id(settings_page)->obj };
@@ -218,6 +290,12 @@ time:
           - lvgl.label.update:      # #22 列表模式的小時鐘(藏著時更新也只是改字串)
               id: list_clock_l
               text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
+          - lambda: |-
+              // #24 時鐘頁:只在顯示中更新
+              if (lv_scr_act() != id(clock_page)->obj) return;
+              auto t = id(rtc_time).now();
+              lv_label_set_text(id(cp_time_l), t.strftime("%H:%M:%S").c_str());
+              lv_label_set_text(id(cp_date_l), t.is_valid() ? t.strftime("%a  %Y-%m-%d").c_str() : "");
       - seconds: 0           # 每分鐘檢查鬧鐘
         then:
           - lambda: |-
@@ -261,6 +339,74 @@ text:
     optimistic: true
     restore_value: true
     entity_category: config
+  - platform: template
+    name: HA Sensor 1            # #24 時鐘頁 HA 1 的 entity_id(也可在卡片齒輪 → HA SENSORS 挑)
+    id: ha_sens0
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          // 換了實體:清掉舊名稱/數值/曲線點,等下一次抓值
+          shub::Reading &r = shub::g_rd[shub::HA1 + 0];
+          shub::init();
+          r.registered = false;
+          r.value = NAN;
+          snprintf(r.name, sizeof(r.name), "HA 1");
+          if (r.hist) for (int i = 0; i < shub::HIST_N; i++) r.hist[i] = NAN; r.count = 0;
+      - script.execute: shub_ha_poll
+  - platform: template
+    name: HA Sensor 2            # #24 時鐘頁 HA 2 的 entity_id(也可在卡片齒輪 → HA SENSORS 挑)
+    id: ha_sens1
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          // 換了實體:清掉舊名稱/數值/曲線點,等下一次抓值
+          shub::Reading &r = shub::g_rd[shub::HA1 + 1];
+          shub::init();
+          r.registered = false;
+          r.value = NAN;
+          snprintf(r.name, sizeof(r.name), "HA 2");
+          if (r.hist) for (int i = 0; i < shub::HIST_N; i++) r.hist[i] = NAN; r.count = 0;
+      - script.execute: shub_ha_poll
+  - platform: template
+    name: HA Sensor 3            # #24 時鐘頁 HA 3 的 entity_id(也可在卡片齒輪 → HA SENSORS 挑)
+    id: ha_sens2
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          // 換了實體:清掉舊名稱/數值/曲線點,等下一次抓值
+          shub::Reading &r = shub::g_rd[shub::HA1 + 2];
+          shub::init();
+          r.registered = false;
+          r.value = NAN;
+          snprintf(r.name, sizeof(r.name), "HA 3");
+          if (r.hist) for (int i = 0; i < shub::HIST_N; i++) r.hist[i] = NAN; r.count = 0;
+      - script.execute: shub_ha_poll
+  - platform: template
+    name: HA Sensor 4            # #24 時鐘頁 HA 4 的 entity_id(也可在卡片齒輪 → HA SENSORS 挑)
+    id: ha_sens3
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: |-
+          // 換了實體:清掉舊名稱/數值/曲線點,等下一次抓值
+          shub::Reading &r = shub::g_rd[shub::HA1 + 3];
+          shub::init();
+          r.registered = false;
+          r.value = NAN;
+          snprintf(r.name, sizeof(r.name), "HA 4");
+          if (r.hist) for (int i = 0; i < shub::HIST_N; i++) r.hist[i] = NAN; r.count = 0;
+      - script.execute: shub_ha_poll
   - platform: template
     name: HA Token              # HA 長期存取權杖(個人資料頁→安全性),供喇叭掃描用
     id: ha_token
@@ -437,6 +583,99 @@ select:
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           id(tz_select).publish_state(*i);
 
+  # #24 時鐘頁:格數與各格內容(預設 AUTO;手動指定的格沒資料時顯示 --)
+  - platform: template
+    name: Sensor Grid
+    id: shub_grid_sel
+    entity_category: config
+    options: ["AUTO", "1", "2", "3", "4", "6"]
+    set_action:
+      - lambda: |-
+          static const int M[6] = {0, 1, 2, 3, 4, 6};
+          auto i = id(shub_grid_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_mode) = M[*i];
+          id(shub_grid_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 1
+    id: shub_slot0_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot0_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p0) = (int) *i;
+          id(shub_pin)[0] = (int) *i;
+          id(shub_slot0_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 2
+    id: shub_slot1_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot1_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p1) = (int) *i;
+          id(shub_pin)[1] = (int) *i;
+          id(shub_slot1_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 3
+    id: shub_slot2_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot2_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p2) = (int) *i;
+          id(shub_pin)[2] = (int) *i;
+          id(shub_slot2_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 4
+    id: shub_slot3_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot3_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p3) = (int) *i;
+          id(shub_pin)[3] = (int) *i;
+          id(shub_slot3_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 5
+    id: shub_slot4_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot4_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p4) = (int) *i;
+          id(shub_pin)[4] = (int) *i;
+          id(shub_slot4_sel).publish_state(x);
+          id(shub_refresh).execute();
+  - platform: template
+    name: Sensor Slot 6
+    id: shub_slot5_sel
+    entity_category: config
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_slot5_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_p5) = (int) *i;
+          id(shub_pin)[5] = (int) *i;
+          id(shub_slot5_sel).publish_state(x);
+          id(shub_refresh).execute();
+
 http_request:
   timeout: 20s
   verify_ssl: false
@@ -470,14 +709,15 @@ globals:
   - { id: sweep_angle, type: float,    initial_value: '0' }
   - { id: slot_angle, type: 'std::vector<float>' }   # 各槽方位角(度,-1=隱藏)
   - { id: slot_glow,  type: 'std::vector<float>' }   # 各槽掃描高亮 0~1
+  # 新燒錄預設開地圖與回波(#23:新使用者以為沒有地圖);已存過的裝置照 NVS
   - id: map_on
     type: bool
     restore_value: true
-    initial_value: 'false'
+    initial_value: 'true'
   - id: echo_on
     type: bool
     restore_value: true
-    initial_value: 'false'
+    initial_value: 'true'
   - { id: info_on, type: bool, initial_value: 'false' }   # i 鈕:右下面板顯示系統資訊
   - id: atc_on
     type: bool
@@ -515,6 +755,15 @@ globals:
   - { id: trail_cs,  type: 'std::vector<std::string>' }   # 各軌跡槽目前記錄的呼號(換機時作廢舊歷史)
   - { id: conflict_slot, type: 'std::vector<uint8_t>' }   # 各槽是否觸發 STCA 衝突告警
   - { id: lbl_side, type: 'std::vector<uint8_t>' }        # 各槽標籤位置 0=右 1=左(避開向量線)
+  # #24 時鐘/感測器頁:格數 0=AUTO 或 1/2/3/4/6;各格指定 0=自動、1..10 = shub::Key+1
+  - { id: shub_mode, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_pin, type: 'std::vector<int>' }   # 開機時由下面 6 個 NVS 值組成
+  - { id: shub_p0, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_p1, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_p2, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_p3, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_p4, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_p5, type: int, restore_value: true, initial_value: '0' }
   # #22 航班 strip 列表
   - { id: list_on, type: bool, restore_value: true, initial_value: 'false' }   # 右欄是否為列表模式(重開機沿用)
   - { id: list_page, type: int, initial_value: '0' }                           # 目前頁數(超出範圍時 strips_update 會繞回)
@@ -811,6 +1060,39 @@ script:
                              (int) wifi::global_wifi_component->wifi_rssi());
           // sel_l5(SQUAWK 列)由 radar_show_sysinfo 填入 MAP 狀態,不清空
           radar_type_badge(id(sel_type_l), "");   // 隱藏機型徽章(標題列改顯示面板名稱)
+
+  - id: shub_ha_poll           # #24 讀 HA 1~4 選定實體的數值(背景,一次請求)
+    mode: single
+    then:
+      - lambda: |-
+          if (id(ha_token).state.empty() || !wifi::global_wifi_component->is_connected()) return;
+          std::string ids;
+          std::string E[4] = { id(ha_sens0).state, id(ha_sens1).state, id(ha_sens2).state, id(ha_sens3).state };
+          for (auto &e : E) {
+            bool ok = !e.empty() && e.find('.') != std::string::npos;
+            for (char c : e) if (!(isalnum((unsigned char) c) || c == '_' || c == '.')) ok = false;
+            if (!ok) continue;   // 只接受合法 entity_id,模板裡直接用單引號包起來
+            if (!ids.empty()) ids += ",";
+            ids += e;
+          }
+          if (ids.empty()) return;
+          std::string url = id(ha_url).state;
+          if (url.empty()) url = "http://homeassistant.local:8123";
+          radar_bg::request_ha_vals(url, id(ha_token).state, ids);
+
+  - id: shub_refresh           # #24 時鐘頁:重排 + 刷新(頁面不在畫面上就跳過)
+    mode: single
+    then:
+      - lambda: |-
+          shub::g_ha_enabled = !id(ha_token).state.empty();
+          if (lv_scr_act() != id(clock_page)->obj) return;
+          shub::layout(id(shub_mode), id(shub_pin).data());
+          shub::refresh(id(units_imperial));
+          static const char *GL[7] = {"AUTO", "1", "2", "3", "4", "", "6"};
+          int m = id(shub_mode);
+          char b[16];
+          snprintf(b, sizeof(b), "GRID %s", (m >= 0 && m <= 6) ? GL[m] : "?");
+          lv_label_set_text(id(cp_grid_l), b);
 
   - id: show_weather           # 無選取航班時,右下角面板顯示在地天氣(Open-Meteo)
     mode: single
@@ -1120,6 +1402,41 @@ sensor:
     update_interval: 60s
   - platform: uptime
     name: Uptime
+  # #24 I2C 本地感測器(沒偵測到就是 unknown)
+  - platform: template
+    name: Indoor Temperature
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: 'return isens::value(shub::IN_T);'
+  - platform: template
+    name: Indoor Humidity
+    unit_of_measurement: "%"
+    device_class: humidity
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return isens::value(shub::IN_H);'
+  - platform: template
+    name: Indoor Pressure
+    unit_of_measurement: "hPa"
+    device_class: atmospheric_pressure
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: 'return isens::value(shub::PRES);'
+  - platform: template
+    name: Indoor CO2
+    unit_of_measurement: "ppm"
+    device_class: carbon_dioxide
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return isens::value(shub::CO2);'
+
+text_sensor:
+  - platform: template
+    name: I2C Sensors
+    update_interval: 60s
+    lambda: 'return isens::g_found;'
 
 button:
   - platform: restart
@@ -1276,9 +1593,39 @@ interval:
           if (radar_bg::g_wx_ready) {
             xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
             radar_bg::g_wx_ready = false;
+            float wt = radar_bg::g_wx.temp, wh = radar_bg::g_wx.hum;
             xSemaphoreGive(radar_bg::mtx());
+            shub::set(shub::OUT_T, wt);   // #24 時鐘頁 OUTDOOR 卡片
+            shub::set(shub::OUT_H, wh);
             if (id(sel_cs_g).empty())
               id(show_weather).execute();
+          }
+          // #24 HA 感測器清單(齒輪 → HA SENSORS)
+          if (radar_bg::g_ha_list_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ha_list_ready = false;
+            std::string raw = radar_bg::g_ha_list;
+            int st3 = radar_bg::g_ha_list_status;
+            xSemaphoreGive(radar_bg::mtx());
+            shub::show_ha_list(raw, st3);
+          }
+          // #24 HA 感測器數值 → HA 1~4
+          if (radar_bg::g_ha_vals_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ha_vals_ready = false;
+            std::string raw = radar_bg::g_ha_vals;
+            xSemaphoreGive(radar_bg::mtx());
+            std::string E[4] = { id(ha_sens0).state, id(ha_sens1).state, id(ha_sens2).state, id(ha_sens3).state };
+            for (auto &h : shub::parse_ha(raw)) {
+              for (int k = 0; k < 4; k++) {
+                if (E[k] != h.id) continue;
+                shub::describe((shub::Key) (shub::HA1 + k), h.name.c_str(), "HA", h.unit.c_str(),
+                               shub::decimals_of(h.state));
+                char *end = nullptr;
+                float v = strtof(h.state.c_str(), &end);
+                if (end && end != h.state.c_str() && *end == 0) shub::set((shub::Key) (shub::HA1 + k), v);
+              }
+            }
           }
           // 喇叭掃描結果 → 填入鬧鐘頁 5 個下拉選單(1-4 專屬 + DEF 預設)
           if (radar_bg::g_speakers_ready) {
@@ -1803,6 +2150,27 @@ interval:
                      (id(backlight).current_values.is_on() || id(poll_when_off));
           then:
             - script.execute: echo_refresh
+  # #24 I2C 本地感測器:開機 3 秒後探測一次,之後每 100ms 讓到時間的裝置走一步
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (!isens::g_probed) {
+            if (millis() > 3000) isens::probe(id(sens_i2c));
+            return;
+          }
+          isens::tick();
+  # #24 感測器曲線取樣:每 1 分鐘一點,24 小時 1440 點
+  - interval: 60s
+    then:
+      - lambda: 'shub::sample();'
+  # #24 HA 感測器數值:每 15 秒(只抓選中的最多 4 個,一次請求)
+  - interval: 15s
+    then:
+      - script.execute: shub_ha_poll
+  # #24 時鐘頁顯示中:每 5 秒重排(AUTO 格數會隨數值增減)+ 刷新數值與曲線
+  - interval: 5s
+    then:
+      - script.execute: shub_refresh
   # 每 5 秒刷新 WiFi 狀態與座標顯示(只重繪那兩行)
   - interval: 5s
     then:
@@ -1848,6 +2216,10 @@ font:
     id: font_clock
     size: ${f_clock}
     glyphs: "0123456789:- ALMR"
+  - file: "gfonts://Roboto Condensed@700"
+    id: font_value              # #24 感測器卡片的大數字
+    size: ${f_value}
+    glyphs: "0123456789.-"
   - file: "gfonts://Roboto Mono"
     id: font_mono
     size: ${f_mono}

@@ -170,6 +170,7 @@ light:
 
 # ---- Touch + audio codec share one I2C bus (GT911 0x5D/0x14, ES8311 0x18) ----
 i2c:
+  id: sens_i2c                  # #24 I2C 感測器也掛這條(sensors_i2c.h)
   sda: GPIO7
   scl: GPIO8
   frequency: 400kHz

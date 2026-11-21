@@ -3,6 +3,26 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.4.3] — 2026-11-21
+
+Prebuilt image for the P4 (`v1.4.3-p4`). The S3 boards get the same features as v1.4.0.
+
+### Added
+
+- **Clock & sensor page** (#24). Tapping the clock now opens a full-screen clock with up to 6
+  sensor cards below it, each with its value, MAX/MIN and a 24-hour curve. **The alarm page moved
+  behind the page's ALARM button.**
+  - Sources: outdoor temperature/humidity from the local weather; I²C sensors detected at boot on
+    the touch bus (SHT3x/SHT4x, BME280/BMP280, SCD40/41; 0x38/AHT20 is not probed on this board);
+    and up to 4 Home Assistant sensors picked from an on-screen list grouped by category.
+  - Card count is automatic or set with GRID / *Sensor Grid*. Each card's ⚙ chooses its value
+    (also *Sensor Slot 1–6* in the web UI) and sets HIGH/LOW thresholds with their own colors.
+
+### Changed
+
+- **MAP and ECHO are on after a fresh flash** (#23). Devices that already saved a choice keep it.
+- **Map outlines stay visible under heavy rain** (#23). The outlines now show through the echo.
+
 ## [v1.4.2] — 2026-11-08
 
 Prebuilt image for the P4 (`v1.4.2-p4`). The S3 boards get the same features as v1.3.12.
