@@ -71,10 +71,10 @@ esphome:
             id(shub_mode) = M[mi];
             id(shub_grid_sel)->publish_state((size_t) mi);
             shub::build(id(clock_page)->obj, ${disp_w}, ${disp_h},
-                        lv_obj_get_style_text_font(id(cp_date_l), 0),
-                        lv_obj_get_style_text_font(id(cp_valfont_l), 0),
-                        lv_obj_get_style_text_font(id(cp_tinyfont_l), 0),
-                        lv_obj_get_style_text_font(id(wifi_icon), 0));   // Montserrat:齒輪符號
+                        lv_obj_get_style_text_font(id(cp_date_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_valfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_tinyfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(wifi_icon), LV_PART_MAIN));   // Montserrat:齒輪符號
             // 卡片齒輪選單選定 → 走該格 select 的 set_action(寫 NVS、同步網頁、重排)
             shub::g_on_pick = [](int slot, int val) {
               select::Select *SS[6] = { id(shub_slot0_sel), id(shub_slot1_sel), id(shub_slot2_sel),

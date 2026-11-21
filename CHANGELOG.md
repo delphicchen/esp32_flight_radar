@@ -9,7 +9,7 @@ out first, because that is the part that costs you time.
 
 - **Clock & sensor page** (#24, S3 boards). Tapping the clock now opens a full-screen clock with
   up to 6 sensor cards below it, each with its value, MAX/MIN and a 24-hour curve. **The alarm page
-  moved behind the page's ALARM button.** The P4 is unchanged.
+  moved behind the page's ALARM button.** The P4 gets the same page in v1.4.3-p4.
   - Sources: outdoor temperature/humidity from the local weather; I²C sensors detected at boot
     (AHT20, SHT3x/SHT4x, BME280/BMP280, SCD40/41); and up to 4 Home Assistant sensors picked from
     an on-screen list grouped by category, refreshed every 15 s.

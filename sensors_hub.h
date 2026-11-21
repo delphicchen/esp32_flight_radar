@@ -16,6 +16,13 @@
 
 namespace shub {
 
+// 曲線點座標:LVGL 9 的 lv_line 改用 lv_point_precise_t(main 是 LVGL 8,lvgl9 分支是 9)
+#if LVGL_VERSION_MAJOR >= 9
+typedef lv_point_precise_t spark_pt_t;
+#else
+typedef lv_point_t spark_pt_t;
+#endif
+
 // 固定的數值種類;順序就是 AUTO 排列順序(網路 → 本地 → HA)
 enum Key : uint8_t { OUT_T = 0, OUT_H, IN_T, IN_H, PRES, CO2, HA1, HA2, HA3, HA4, KEY_N };
 static const int HIST_N = 1440;         // 每 1 分鐘一點 × 24 小時(每筆 5.6KB,放 PSRAM)
@@ -184,7 +191,7 @@ inline void sample() {
 // ---------------- 畫面 ----------------
 struct Card {
   lv_obj_t *box, *name, *tag, *gear, *val, *unit, *hi, *lo, *line, *t0, *t1;
-  lv_point_t pts[SPARK_N];
+  spark_pt_t pts[SPARK_N];
 };
 inline Card g_card[SLOT_MAX];
 inline int g_slot_key[SLOT_MAX];        // 各格目前顯示的 key,-1 = 空格

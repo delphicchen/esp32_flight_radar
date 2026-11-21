@@ -12,7 +12,7 @@ Assistant,以及在台灣以外地區使用。
 ## English
 ## Alarm clock
 
-- Tap the **clock**, then **ALARM**, to open the alarm page (4 slots; on the P4, tapping the clock opens it directly). For each: enable, tap the time to open a large scroll-wheel time picker, choose the weekdays, and (optionally) pick that alarm's own speaker from the dropdown at the end of its row.
+- Tap the **clock**, then **ALARM**, to open the alarm page (4 slots). For each: enable, tap the time to open a large scroll-wheel time picker, choose the weekdays, and (optionally) pick that alarm's own speaker from the dropdown at the end of its row.
 - In the config fields set **Alarm Speaker** (a Home Assistant `media_player` entity, e.g. `media_player.living_room`) and optionally **Alarm Sound URL** (an mp3).
 - In Home Assistant, open the device page and enable **"Allow the device to perform Home Assistant actions."** Otherwise the ESP32 cannot command the speaker.
 - When an alarm fires, a **SNOOZE 9m / DISMISS** panel appears on screen. The sound **re-plays every 15 s until you press DISMISS**, so a short mp3 still keeps ringing.
@@ -60,8 +60,7 @@ Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = t
 
 ## Clock & sensor page
 
-S3 boards from v1.4.0. The P4 (lvgl9 branch) does not have it yet; there, tapping the clock still
-opens the alarm page.
+From v1.4.0 on the S3 boards and v1.4.3-p4 on the P4.
 
 - **Open it:** tap the clock on the radar page. Tap the big clock again, or **RADAR**, to go back.
   **ALARM** opens the alarm page, and **PWR** turns the screen off (touch to wake).
@@ -234,7 +233,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 ## 中文
 ## 鬧鐘
 
-- 點**時鐘**再點 **ALARM** 開啟鬧鐘頁(4 組;P4 點時鐘直接進入)。每組:啟用、點時間彈出大型捲輪選擇器設定時 / 分、選擇星期幾,列尾的下拉選單可(選擇性)指定該組專屬喇叭。
+- 點**時鐘**再點 **ALARM** 開啟鬧鐘頁(4 組)。每組:啟用、點時間彈出大型捲輪選擇器設定時 / 分、選擇星期幾,列尾的下拉選單可(選擇性)指定該組專屬喇叭。
 - 在設定欄位填入 **Alarm Speaker**(Home Assistant 的 `media_player` 實體,例如 `media_player.living_room`),以及可選的 **Alarm Sound URL**(mp3)。
 - 在 Home Assistant 的裝置頁開啟「**允許此裝置執行 Home Assistant 動作**」,否則 ESP32 無法命令喇叭。
 - 鬧鐘響時,螢幕會出現 **SNOOZE 9m / DISMISS** 面板。聲音會**每 15 秒重播一次,直到你按下 DISMISS**,所以短音檔也能持續響。
@@ -282,7 +281,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 
 ## 時鐘/感測器頁
 
-S3 板子從 v1.4.0 起提供。P4(lvgl9 分支)還沒有這一頁,點時鐘仍然是進鬧鐘頁。
+S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供。
 
 - **進入:** 在雷達頁點時鐘。點大時鐘或 **RADAR** 回雷達。**ALARM** 進鬧鐘頁,**PWR** 關螢幕(觸控喚醒)。
 - **卡片:** 每張卡片顯示名稱、來源標籤、數值、MAX/MIN 和曲線。每分鐘記一點,在 RAM 裡保留

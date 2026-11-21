@@ -88,7 +88,7 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 - **Map outline** — coastlines, borders, airports, runways, navaids and airspace.
 - **Alarm clock** — 4 alarms with per-weekday scheduling, ringing through a Home Assistant
   speaker or the board's own (P4).
-- **Clock & sensor page — tap the clock** (S3 boards, v1.4.0). A full-screen clock with the date
+- **Clock & sensor page — tap the clock** (v1.4.0; P4 v1.4.3-p4). A full-screen clock with the date
   on top, and below it up to 6 sensor cards, each with its value, MAX/MIN and a curve of the last
   24 hours. Values come from local weather (outdoor temperature/humidity), I²C sensors found
   automatically at boot (AHT20, SHT3x/SHT4x, BME280/BMP280, SCD40/41 CO2), and any numeric
@@ -98,7 +98,7 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
   the screen off. Details: [Usage guide](docs/USAGE.md#clock--sensor-page).
 
   ![Clock and sensor page with Home Assistant CO2 and outdoor temperature/humidity cards](docs/clock_page.png)
-- **Alarms and timezone: clock page → ALARM** (on the P4, tap the clock). The clock defaults to Taipei time; pick
+- **Alarms and timezone: clock page → ALARM**. The clock defaults to Taipei time; pick
   yours under **TIMEZONE** on that page (also in the web UI as *Timezone*), or choose
   **AUTO (BY LOCATION)** to follow your coordinates, daylight saving included.
 - **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
@@ -177,7 +177,7 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   解碼合成,UI 完全不卡。
 - **地圖輪廓** —— 海岸線、行政邊界、機場、跑道、導航點與空域。
 - **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
-- **時鐘/感測器頁 —— 點時鐘**(S3 板子,v1.4.0)。上方是全螢幕時鐘與日期,下方最多 6 張
+- **時鐘/感測器頁 —— 點時鐘**(v1.4.0;P4 為 v1.4.3-p4)。上方是全螢幕時鐘與日期,下方最多 6 張
   感測器卡片,顯示數值、MAX/MIN 和最近 24 小時的曲線。數值來源:在地天氣(室外溫濕度)、
   開機自動偵測的 I²C 感測器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及從
   畫面清單依類別挑選的任何 Home Assistant 數值感測器。卡片數量自動決定,也可用 **GRID** 指定。
@@ -185,7 +185,7 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
   詳見[使用說明](docs/USAGE.md#時鐘感測器頁)。
 
   ![時鐘/感測器頁:Home Assistant CO2 與室外溫濕度卡片](docs/clock_page.png)
-- **鬧鐘與時區:時鐘頁 → ALARM**(P4 是點時鐘)—— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
+- **鬧鐘與時區:時鐘頁 → ALARM**—— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
   (網頁介面的 *Timezone* 也能改),或選 **AUTO (BY LOCATION)** 依座標自動判斷(含日光節約)。
 - **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
   即可停掉旋轉掃描線;航班照常顯示,亮度固定。
@@ -258,7 +258,7 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
   解码合成,UI 完全不卡。
 - **地图轮廓** —— 海岸线、行政边界、机场、跑道、导航点与空域。
 - **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
-- **时钟/传感器页 —— 点时钟**(S3 板子,v1.4.0)。上方是全屏时钟与日期,下方最多 6 张
+- **时钟/传感器页 —— 点时钟**(v1.4.0;P4 为 v1.4.3-p4)。上方是全屏时钟与日期,下方最多 6 张
   传感器卡片,显示数值、MAX/MIN 和最近 24 小时的曲线。数值来源:本地天气(室外温湿度)、
   开机自动检测的 I²C 传感器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及从
   屏幕列表按类别挑选的任何 Home Assistant 数值传感器。卡片数量自动决定,也可用 **GRID** 指定。
@@ -266,7 +266,7 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
   详见[使用说明](docs/USAGE.md#時鐘感測器頁)。
 
   ![时钟/传感器页:Home Assistant CO2 与室外温湿度卡片](docs/clock_page.png)
-- **闹钟与时区:时钟页 → ALARM**(P4 是点时钟)—— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
+- **闹钟与时区:时钟页 → ALARM**—— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
   (网页界面的 *Timezone* 也能改),或选 **AUTO (BY LOCATION)** 按坐标自动判断(含夏令时)。
 - **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
   即可停掉旋转扫描线;航班照常显示,亮度固定。
