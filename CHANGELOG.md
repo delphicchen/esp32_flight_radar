@@ -5,6 +5,8 @@ out first, because that is the part that costs you time.
 
 ## [v1.4.1] — 2026-11-27
 
+The P4 gets the same changes in v1.4.4-p4.
+
 ### Added
 
 - **Large clock** (#24, S3 boards). Tap the time on the clock page to switch to a large, centered

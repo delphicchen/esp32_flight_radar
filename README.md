@@ -90,8 +90,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
   speaker or the board's own (P4).
 - **Clock & sensor page — tap the clock** (v1.4.0; P4 v1.4.3-p4). A full-screen clock with the date
   on top, and below it up to 6 sensor cards, each with its value, MAX/MIN and a curve of the last
-  24 hours. Tap the time for a large clock (S3 v1.4.1). Values come from local weather (outdoor
-  temperature/humidity, plus sea-level pressure from S3 v1.4.1), I²C sensors found
+  24 hours. Tap the time for a large clock (S3 v1.4.1, P4 v1.4.4-p4). Values come from local weather (outdoor
+  temperature/humidity, plus sea-level pressure from S3 v1.4.1 / P4 v1.4.4-p4), I²C sensors found
   automatically at boot (AHT20, SHT3x/SHT4x, BME280/BMP280, SCD40/41 CO2), and any numeric
   Home Assistant sensor you pick from an on-screen list sorted by category. The number of cards
   is automatic, or set it with **GRID**. Tap a card's ⚙ to choose what it shows or to set
@@ -179,8 +179,8 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
 - **地圖輪廓** —— 海岸線、行政邊界、機場、跑道、導航點與空域。
 - **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
 - **時鐘/感測器頁 —— 點時鐘**(v1.4.0;P4 為 v1.4.3-p4)。上方是全螢幕時鐘與日期,下方最多 6 張
-  感測器卡片,顯示數值、MAX/MIN 和最近 24 小時的曲線。點時間切換大時鐘(S3 v1.4.1 起)。
-  數值來源:在地天氣(室外溫濕度;S3 v1.4.1 起另有海平面氣壓)、
+  感測器卡片,顯示數值、MAX/MIN 和最近 24 小時的曲線。點時間切換大時鐘(S3 v1.4.1、P4 v1.4.4-p4 起)。
+  數值來源:在地天氣(室外溫濕度;S3 v1.4.1、P4 v1.4.4-p4 起另有海平面氣壓)、
   開機自動偵測的 I²C 感測器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及從
   畫面清單依類別挑選的任何 Home Assistant 數值感測器。卡片數量自動決定,也可用 **GRID** 指定。
   點卡片的 ⚙ 選擇要顯示的內容,或設定上下限與各自的顏色。**ALARM** 進鬧鐘頁,**PWR** 關螢幕。
@@ -261,8 +261,8 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 - **地图轮廓** —— 海岸线、行政边界、机场、跑道、导航点与空域。
 - **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
 - **时钟/传感器页 —— 点时钟**(v1.4.0;P4 为 v1.4.3-p4)。上方是全屏时钟与日期,下方最多 6 张
-  传感器卡片,显示数值、MAX/MIN 和最近 24 小时的曲线。点时间切换大时钟(S3 v1.4.1 起)。
-  数值来源:本地天气(室外温湿度;S3 v1.4.1 起另有海平面气压)、
+  传感器卡片,显示数值、MAX/MIN 和最近 24 小时的曲线。点时间切换大时钟(S3 v1.4.1、P4 v1.4.4-p4 起)。
+  数值来源:本地天气(室外温湿度;S3 v1.4.1、P4 v1.4.4-p4 起另有海平面气压)、
   开机自动检测的 I²C 传感器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及从
   屏幕列表按类别挑选的任何 Home Assistant 数值传感器。卡片数量自动决定,也可用 **GRID** 指定。
   点卡片的 ⚙ 选择要显示的内容,或设定上下限与各自的颜色。**ALARM** 进闹钟页,**PWR** 关屏幕。

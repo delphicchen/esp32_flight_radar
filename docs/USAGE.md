@@ -60,7 +60,8 @@ Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = t
 
 ## Clock & sensor page
 
-From v1.4.0 on the S3 boards and v1.4.3-p4 on the P4.
+From v1.4.0 on the S3 boards and v1.4.3-p4 on the P4. The large clock and outdoor pressure
+came in v1.4.1 (S3) and v1.4.4-p4 (P4).
 
 - **Open it:** tap the clock on the radar page. **RADAR** goes back.
 - **Large clock:** tap the time to switch between the normal layout and a large clock with one row of up to 3 cards (also **Large Clock** on the web page).
@@ -282,7 +283,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 
 ## 時鐘/感測器頁
 
-S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供。
+S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供;大時鐘與室外氣壓是 v1.4.1(S3)/ v1.4.4-p4(P4)加入。
 
 - **進入:** 在雷達頁點時鐘。**RADAR** 回雷達。點時間切換大時鐘模式(時間放大、卡片收成一列最多 3 張;網頁 **Large Clock** 同步)。**ALARM** 進鬧鐘頁,**PWR** 關螢幕(觸控喚醒)。
 - **卡片:** 每張卡片顯示名稱、來源標籤、數值、MAX/MIN 和曲線。每分鐘記一點,在 RAM 裡保留
