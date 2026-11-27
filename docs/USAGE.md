@@ -62,7 +62,8 @@ Troubleshooting: `SET HA TOKEN FIRST` = step 2 not done yet; `TOKEN INVALID` = t
 
 From v1.4.0 on the S3 boards and v1.4.3-p4 on the P4.
 
-- **Open it:** tap the clock on the radar page. Tap the big clock again, or **RADAR**, to go back.
+- **Open it:** tap the clock on the radar page. **RADAR** goes back.
+- **Large clock:** tap the time to switch between the normal layout and a large clock with one row of up to 3 cards (also **Large Clock** on the web page).
   **ALARM** opens the alarm page, and **PWR** turns the screen off (touch to wake).
 - **Cards:** each card shows a name, a source tag, the value, MAX/MIN and a curve. One point is
   recorded every minute and kept for 24 hours in RAM, so a reboot starts the curves empty. The
@@ -74,7 +75,7 @@ From v1.4.0 on the S3 boards and v1.4.3-p4 on the P4.
   I²C sensors, then Home Assistant sensors. Pick a value to pin it to that card. The web UI
   has the same choice as *Sensor Slot 1–6*.
 - **Sources**
-  - **Outdoor** temperature and humidity come from the local weather (Open-Meteo).
+  - **Outdoor** temperature, humidity and sea-level pressure come from the local weather (Open-Meteo).
   - **I²C sensors** are detected at boot, so nothing has to be configured:
 
     | Address | Chip | Values |
@@ -283,7 +284,7 @@ python tools/make_map.py --lat 23.8 --lon 121.0 --radius 320 --countries TW --no
 
 S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供。
 
-- **進入:** 在雷達頁點時鐘。點大時鐘或 **RADAR** 回雷達。**ALARM** 進鬧鐘頁,**PWR** 關螢幕(觸控喚醒)。
+- **進入:** 在雷達頁點時鐘。**RADAR** 回雷達。點時間切換大時鐘模式(時間放大、卡片收成一列最多 3 張;網頁 **Large Clock** 同步)。**ALARM** 進鬧鐘頁,**PWR** 關螢幕(觸控喚醒)。
 - **卡片:** 每張卡片顯示名稱、來源標籤、數值、MAX/MIN 和曲線。每分鐘記一點,在 RAM 裡保留
   24 小時,重開機會從空的開始。曲線涵蓋目前已有的資料,範圍 1 到 24 小時(左下角標示)。
   超過 30 分鐘沒更新的數值顯示 `--`。
@@ -292,7 +293,7 @@ S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供。
 - **每張卡片顯示什麼:** 點卡片的 ⚙。AUTO 依序填入室外天氣、I²C 感測器、Home Assistant 感測器;
   選定某個數值就固定在那一格。網頁介面的 *Sensor Slot 1–6* 是同一個設定。
 - **資料來源**
-  - **室外**溫濕度來自在地天氣(Open-Meteo)。
+  - **室外**溫濕度與海平面氣壓來自在地天氣(Open-Meteo)。
   - **I²C 感測器**開機自動偵測,不用設定:
 
     | 位址 | 晶片 | 數值 |

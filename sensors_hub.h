@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+#include "esphome/core/time.h"
 
 namespace shub {
 
@@ -23,8 +24,11 @@ typedef lv_point_precise_t spark_pt_t;
 typedef lv_point_t spark_pt_t;
 #endif
 
-// 固定的數值種類;順序就是 AUTO 排列順序(網路 → 本地 → HA)
-enum Key : uint8_t { OUT_T = 0, OUT_H, IN_T, IN_H, PRES, CO2, HA1, HA2, HA3, HA4, KEY_N };
+// 固定的數值種類
+// OUT_P 加在最後:網頁 Sensor Slot 下拉與 NVS 存的是 key+1,插在中間會讓舊設定錯位
+enum Key : uint8_t { OUT_T = 0, OUT_H, IN_T, IN_H, PRES, CO2, HA1, HA2, HA3, HA4, OUT_P, KEY_N };
+// AUTO 排列與齒輪選單的順序(網路 → 本地 → HA)
+static const uint8_t ORDER[KEY_N] = {OUT_T, OUT_H, OUT_P, IN_T, IN_H, PRES, CO2, HA1, HA2, HA3, HA4};
 static const int HIST_N = 1440;         // 每 1 分鐘一點 × 24 小時(每筆 5.6KB,放 PSRAM)
 static const int SLOT_MAX = 6;
 static const int SPARK_N = 96;          // 曲線畫 96 點(依時間窗平均)
@@ -57,6 +61,11 @@ struct AlertTab {
   Alert a[KEY_N];
 };
 static const uint32_t ALERT_MAGIC = 0x414C5431;   // "ALT1"
+static const int KEY_N_V1 = 10;                    // v1.4.0 存的門檻表只有 10 個 key(沒有 OUT_P)
+struct AlertTabV1 {
+  uint32_t magic;
+  Alert a[KEY_N_V1];
+};
 inline AlertTab g_al;
 inline esphome::ESPPreferenceObject g_al_pref;
 
@@ -71,10 +80,17 @@ inline void alert_default(int k) {
   if (k == CO2) a.hi = 1200;   // 取代原本寫死的 CO2 分級
 }
 inline void alert_load() {
-  g_al_pref = esphome::global_preferences->make_preference<AlertTab>(esphome::fnv1_hash("shub_alert_v1"));
+  g_al_pref = esphome::global_preferences->make_preference<AlertTab>(esphome::fnv1_hash("shub_alert_v2"));
   if (!g_al_pref.load(&g_al) || g_al.magic != ALERT_MAGIC) {
     g_al.magic = ALERT_MAGIC;
     for (int k = 0; k < KEY_N; k++) alert_default(k);
+    // 從 v1(10 個 key)搬過來,升級後不會弄丟已設定的門檻
+    AlertTabV1 old;
+    auto p1 = esphome::global_preferences->make_preference<AlertTabV1>(esphome::fnv1_hash("shub_alert_v1"));
+    if (p1.load(&old) && old.magic == ALERT_MAGIC) {
+      for (int k = 0; k < KEY_N_V1; k++) g_al.a[k] = old.a[k];
+      g_al_pref.save(&g_al);
+    }
   }
   for (int k = 0; k < KEY_N; k++) {   // 讀回的索引防呆
     Alert &a = g_al.a[k];
@@ -109,7 +125,8 @@ inline void init() {
       {"TEMP", "INDOOR", "C", 1, true},    {"HUM", "INDOOR", "%", 0, false},
       {"PRESSURE", "INDOOR", "hPa", 0, false}, {"CO2", "INDOOR", "ppm", 0, false},
       {"HA 1", "HA", "", 1, false}, {"HA 2", "HA", "", 1, false},
-      {"HA 3", "HA", "", 1, false}, {"HA 4", "HA", "", 1, false}};
+      {"HA 3", "HA", "", 1, false}, {"HA 4", "HA", "", 1, false},
+      {"PRESSURE", "OUTDOOR", "hPa", 0, false}};
   for (int k = 0; k < KEY_N; k++) {
     Reading &r = g_rd[k];
     snprintf(r.name, sizeof(r.name), "%s", DEF[k].n);
@@ -192,8 +209,39 @@ inline void sample() {
 struct Card {
   lv_obj_t *box, *name, *tag, *gear, *val, *unit, *hi, *lo, *line, *t0, *t1;
   spark_pt_t pts[SPARK_N];
+  int np = -1;                    // 目前畫的點數(-1 = 還沒設過)
+  uint32_t col = 0xFFFFFFFF;      // 目前的數值/曲線顏色
+  uint32_t bcol = 0xFFFFFFFF;     // 目前的外框顏色
+  lv_coord_t bw = -1;             // 目前的外框寬度
 };
 inline Card g_card[SLOT_MAX];
+
+// 內容沒變就不要 set:LVGL 每次 set 文字/樣式/點陣列都會 invalidate 重繪,即使值一樣。
+// 時鐘頁每 5 秒刷新一次,大部分時候數值沒變,這樣幾乎不用重繪。
+inline void set_text(lv_obj_t *l, const char *t) {
+  const char *o = lv_label_get_text(l);
+  if (o && strcmp(o, t) == 0) return;
+  lv_label_set_text(l, t);
+}
+inline void card_style(Card &c, uint32_t col, uint32_t bcol, lv_coord_t bw) {
+  if (c.col != col) {
+    lv_obj_set_style_text_color(c.val, lv_color_hex(col), 0);
+    lv_obj_set_style_line_color(c.line, lv_color_hex(col), 0);
+    c.col = col;
+  }
+  if (c.bcol != bcol || c.bw != bw) {
+    lv_obj_set_style_border_color(c.box, lv_color_hex(bcol), 0);
+    lv_obj_set_style_border_width(c.box, bw, 0);
+    c.bcol = bcol;
+    c.bw = bw;
+  }
+}
+inline void set_line(Card &c, const spark_pt_t *p, int np) {
+  if (np == c.np && memcmp(p, c.pts, np * sizeof(spark_pt_t)) == 0) return;
+  if (p != c.pts) memcpy(c.pts, p, np * sizeof(spark_pt_t));
+  c.np = np;
+  lv_line_set_points(c.line, c.pts, np);
+}
 inline int g_slot_key[SLOT_MAX];        // 各格目前顯示的 key,-1 = 空格
 inline int g_slot_cfg[SLOT_MAX];        // 各格的設定(0=AUTO、key+1),layout() 時記下,選單標示目前選項
 inline int g_shown = -1;                // 目前排出的格數(-1 = 尚未排版)
@@ -340,7 +388,7 @@ inline lv_obj_t *g_al_sw[3][6];      // 正常 / 上限 / 下限 各 6 個色塊
 inline float alert_step(int k) {
   const Reading &r = g_rd[k];
   if (r.temp) return imperial_now ? 5.0f / 9.0f : 0.5f;
-  if (k == OUT_H || k == IN_H || k == PRES) return 1.0f;
+  if (k == OUT_H || k == IN_H || k == PRES || k == OUT_P) return 1.0f;
   if (k == CO2) return 50.0f;
   float m = powf(10.0f, -(float) r.decimals);
   float v = fresh(r) ? fabsf(r.value) : 0.0f;
@@ -510,7 +558,8 @@ inline void open_picker(int slot) {
     if (g_on_pick) g_on_pick(sl, val);
   };
 
-  for (int v = 0; v <= KEY_N; v++) {
+  for (int o = 0; o <= KEY_N; o++) {
+    int v = o == 0 ? 0 : ORDER[o - 1] + 1;
     if (v > 0 && !g_rd[v - 1].registered) continue;   // 只列有資料的
     if (v == 0) {
       snprintf(b, sizeof(b), "AUTO");
@@ -717,6 +766,49 @@ inline void build(lv_obj_t *page, int W, int H, const lv_font_t *f_name, const l
   }
 }
 
+// ---- 頂端時鐘:一般模式 / 大時鐘模式(點時鐘或網頁 Large Clock 切換)----
+// 一般:左上時間,日期放右邊按鈕下方的空位;大:時間置中放大,下方日期,卡片收成一列
+inline bool g_big = false;
+inline lv_coord_t g_top = 0;            // 卡片區起點 y(set_big 算好,layout 用)
+inline lv_obj_t *g_time_l = nullptr, *g_date_l = nullptr, *g_sep = nullptr;
+inline const lv_font_t *g_f_clk = nullptr, *g_f_xl = nullptr;
+
+// 時鐘頁日期:Nov. 27 2026 (Fri)(日不補零;newlib 的 strftime 沒有 %-d)
+inline std::string date_str(esphome::ESPTime t) {   // ESPTime::strftime 不是 const
+  if (!t.is_valid()) return "";
+  char b[32];
+  snprintf(b, sizeof(b), "%s. %d %s", t.strftime("%b").c_str(), t.day_of_month, t.strftime("%Y (%a)").c_str());
+  return b;
+}
+
+inline void clock_init(lv_obj_t *time_l, lv_obj_t *date_l, lv_obj_t *sep, const lv_font_t *f_clk,
+                       const lv_font_t *f_xl) {
+  g_time_l = time_l; g_date_l = date_l; g_sep = sep;
+  g_f_clk = f_clk; g_f_xl = f_xl;
+}
+
+inline void set_big(bool big) {
+  g_big = big;
+  g_top = S(122);
+  if (!g_time_l || !g_built) return;
+  const lv_font_t *fd = lv_obj_get_style_text_font(g_date_l, LV_PART_MAIN);
+  if (big) {
+    // 時間的字框上緣有一段留白,往上提一點才不會跟按鈕列距離太遠
+    lv_obj_set_style_text_font(g_time_l, g_f_xl, 0);
+    lv_obj_align(g_time_l, LV_ALIGN_TOP_MID, 0, S(40));
+    lv_coord_t yd = S(40) + g_f_xl->line_height - S(14);
+    lv_obj_align(g_date_l, LV_ALIGN_TOP_MID, 0, yd);
+    g_top = yd + fd->line_height + S(10);
+    lv_obj_add_flag(g_sep, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_set_style_text_font(g_time_l, g_f_clk, 0);
+    lv_obj_align(g_time_l, LV_ALIGN_TOP_LEFT, S(22), S(6));
+    lv_obj_align(g_date_l, LV_ALIGN_TOP_RIGHT, -S(16), S(62));   // 右緣對齊 RADAR 鈕
+    lv_obj_clear_flag(g_sep, LV_OBJ_FLAG_HIDDEN);
+  }
+  g_shown = -1;   // 卡片區高度變了,下次 layout() 一定重排
+}
+
 // 格數 → 欄列
 inline void grid_of(int n, int &cols, int &rows) {
   switch (n) {
@@ -734,7 +826,8 @@ inline bool layout(int mode, const int *pin) {
   if (!g_built) return false;
   // 自動清單:登記過、且沒被任何一格手動指定的 key,依 enum 順序
   int autos[KEY_N], na = 0;
-  for (int k = 0; k < KEY_N; k++) {
+  for (int o = 0; o < KEY_N; o++) {
+    int k = ORDER[o];
     if (!g_rd[k].registered) continue;
     bool pinned = false;
     for (int i = 0; i < SLOT_MAX; i++) if (pin[i] == k + 1) pinned = true;
@@ -751,6 +844,7 @@ inline bool layout(int mode, const int *pin) {
     if (n > SLOT_MAX) n = SLOT_MAX;
   }
   if (n == 5) n = 6;
+  if (g_big && n > 3) n = 3;   // 大時鐘:只排一列
   int keys[SLOT_MAX], ai = 0;
   for (int i = 0; i < SLOT_MAX; i++) {
     if (i >= n) { keys[i] = -1; continue; }
@@ -764,7 +858,7 @@ inline bool layout(int mode, const int *pin) {
 
   int cols, rows;
   grid_of(n, cols, rows);
-  const lv_coord_t pad = S(8), top = S(122);
+  const lv_coord_t pad = S(8), top = g_top > 0 ? g_top : S(122);
   const lv_coord_t gw = g_W - 2 * pad, gh = g_H - top - pad;
   const lv_coord_t cw = (gw - (cols - 1) * pad) / cols;
   const lv_coord_t ch = (gh - (rows - 1) * pad) / rows;
@@ -810,35 +904,30 @@ inline void refresh(bool imperial) {
     int k = g_slot_key[i];
     if (i >= g_shown) break;
     if (k < 0) {
-      lv_label_set_text(c.name, "");
-      lv_label_set_text(c.tag, "");
-      lv_label_set_text(c.val, "--");
-      lv_obj_set_style_text_color(c.val, lv_color_hex(PAL[0]), 0);
-      lv_obj_set_style_border_color(c.box, lv_color_hex(0x1E4A32), 0);
-      lv_obj_set_style_border_width(c.box, 1, 0);
-      lv_label_set_text(c.unit, "");
-      lv_label_set_text(c.hi, "");
-      lv_label_set_text(c.lo, "");
-      lv_line_set_points(c.line, c.pts, 0);
+      set_text(c.name, "");
+      set_text(c.tag, "");
+      set_text(c.val, "--");
+      card_style(c, PAL[0], 0x1E4A32, 1);
+      set_text(c.unit, "");
+      set_text(c.hi, "");
+      set_text(c.lo, "");
+      set_line(c, c.pts, 0);
       continue;
     }
     const Reading &r = g_rd[k];
-    lv_label_set_text(c.name, r.name);
-    lv_label_set_text(c.tag, r.src);
+    set_text(c.name, r.name);
+    set_text(c.tag, r.src);
     lv_obj_align_to(c.tag, c.gear, LV_ALIGN_OUT_LEFT_MID, -S(8), 0);
     bool ok = fresh(r);
     float v = ok ? disp(r, r.value, imperial) : NAN;
     if (ok) snprintf(b, sizeof(b), "%.*f", (int) r.decimals, v);
     else snprintf(b, sizeof(b), "--");
-    lv_label_set_text(c.val, b);
+    set_text(c.val, b);
     uint32_t col = color_of(k, ok ? r.value : NAN);
-    lv_obj_set_style_text_color(c.val, lv_color_hex(col), 0);
-    lv_obj_set_style_line_color(c.line, lv_color_hex(col), 0);
     bool alarm = ok && alert_state(k, r.value) != 0;   // 超標:外框也換色、加粗
-    lv_obj_set_style_border_color(c.box, lv_color_hex(alarm ? col : 0x1E4A32), 0);
-    lv_obj_set_style_border_width(c.box, alarm ? S(3) : 1, 0);
-    if (r.temp) lv_label_set_text(c.unit, imperial ? "F" : "C");
-    else lv_label_set_text(c.unit, r.unit);
+    card_style(c, col, alarm ? col : 0x1E4A32, alarm ? S(3) : 1);
+    if (r.temp) set_text(c.unit, imperial ? "F" : "C");
+    else set_text(c.unit, r.unit);
     lv_obj_align_to(c.unit, c.val, LV_ALIGN_OUT_RIGHT_BOTTOM, S(4), -S(4));
 
     // 曲線:時間窗 = 已有的資料(至少 1 小時、最多 24 小時),平均成 96 點,最後一點接目前值。
@@ -846,7 +935,7 @@ inline void refresh(bool imperial) {
     int W = r.count < 60 ? 60 : r.count;
     if (W >= 120) snprintf(b, sizeof(b), "-%dh", (W + 30) / 60);
     else snprintf(b, sizeof(b), "-%dm", W);
-    lv_label_set_text(c.t0, b);
+    set_text(c.t0, b);
     float avg[SPARK_N];
     float lo = NAN, hi = NAN;
     for (int j = 0; j < SPARK_N; j++) {
@@ -867,28 +956,29 @@ inline void refresh(bool imperial) {
       if (std::isnan(hi) || avg[j] > hi) hi = avg[j];
     }
     if (std::isnan(lo)) {
-      lv_label_set_text(c.hi, "");
-      lv_label_set_text(c.lo, "");
-      lv_line_set_points(c.line, c.pts, 0);
+      set_text(c.hi, "");
+      set_text(c.lo, "");
+      set_line(c, c.pts, 0);
       continue;
     }
     snprintf(b, sizeof(b), "MAX %.*f", (int) r.decimals, disp(r, hi, imperial));
-    lv_label_set_text(c.hi, b);
+    set_text(c.hi, b);
     snprintf(b, sizeof(b), "MIN %.*f", (int) r.decimals, disp(r, lo, imperial));
-    lv_label_set_text(c.lo, b);
+    set_text(c.lo, b);
     float span = hi - lo;
     if (span < 1e-3f) span = 1.0f;   // 平線:畫在中間
     lv_coord_t w = lv_obj_get_width(c.line), h = lv_obj_get_height(c.line) - 2;
     // lv_line 不能斷開:沒資料的時段直接跳過,前後兩點連起來
+    spark_pt_t pts[SPARK_N];   // 先算到暫存,跟目前的比過有變才換
     int np = 0;
     for (int j = 0; j < SPARK_N; j++) {
       if (std::isnan(avg[j])) continue;
-      c.pts[np].x = (lv_coord_t) (j * (w - 1) / (SPARK_N - 1));
+      pts[np].x = (lv_coord_t) (j * (w - 1) / (SPARK_N - 1));
       float t = (hi - lo < 1e-3f) ? 0.5f : (avg[j] - lo) / span;
-      c.pts[np].y = (lv_coord_t) (1 + h - t * h);
+      pts[np].y = (lv_coord_t) (1 + h - t * h);
       np++;
     }
-    lv_line_set_points(c.line, c.pts, np >= 2 ? np : 0);
+    set_line(c, pts, np >= 2 ? np : 0);
   }
 }
 

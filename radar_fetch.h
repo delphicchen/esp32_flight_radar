@@ -145,7 +145,7 @@ inline void echo_spans_clear() {
   for (int y = 0; y < ECHO_N; y++) { g_echo_x0[y] = ECHO_N; g_echo_x1[y] = -1; }
 }
 inline volatile bool g_auth_fail = false;
-struct WxInfo { float temp, hum, wspd, wdir; };   // 在地天氣(Open-Meteo)
+struct WxInfo { float temp, hum, wspd, wdir, pres; };   // pres:海平面氣壓 hPa   // 在地天氣(Open-Meteo)
 inline WxInfo g_wx;
 inline volatile bool g_wx_ready = false;   // true=g_wx 有新資料待主迴圈取用
 inline volatile bool g_wx_retry = false;   // true=天氣請求被丟掉/連線失敗,主迴圈 1 分鐘後重抓(不等 10 分鐘,#23)
@@ -560,10 +560,10 @@ inline void do_type_cache(const Job &j) {
 
 // Open-Meteo 目前天氣(免金鑰、開源資料)→ g_wx
 inline void do_weather(const Job &j) {
-  char url[224];
+  char url[256];
   snprintf(url, sizeof(url),
            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-           "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m"
+           "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,pressure_msl"
            "&timezone=auto",
            j.lat, j.lon);
   int st = 0;
@@ -598,6 +598,7 @@ inline void do_weather(const Job &j) {
     w.hum  = cur["relative_humidity_2m"] | NAN;
     w.wspd = cur["wind_speed_10m"] | NAN;
     w.wdir = cur["wind_direction_10m"] | NAN;
+    w.pres = cur["pressure_msl"] | NAN;
     got = !isnan(w.temp);
     return true;
   });

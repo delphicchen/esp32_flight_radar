@@ -211,6 +211,8 @@ async def to_code(configs):
     add_define("_LV_KCONFIG_PRESENT")
     # Always enable - lots of things use it.
     add_define("LV_DRAW_COMPLEX", "1")
+    # 本地覆寫:LVGL 自帶的 lv_memcpy 是逐字搬;改用 libc 版(不透明 blit 逐行都在 copy)
+    add_define("LV_MEMCPY_MEMSET_STD", "1")
     add_define("LV_TICK_CUSTOM", "1")
     add_define("LV_TICK_CUSTOM_INCLUDE", '"esphome/components/lvgl/lvgl_hal.h"')
     add_define("LV_TICK_CUSTOM_SYS_TIME_EXPR", "(lv_millis())")

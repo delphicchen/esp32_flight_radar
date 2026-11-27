@@ -5050,7 +5050,7 @@ lvgl:
                   // 進頁面當下就排版 + 填值,不等下一次 5 秒刷新
                   auto t = id(rtc_time).now();
                   lv_label_set_text(id(cp_time_l), t.strftime("%H:%M:%S").c_str());
-                  lv_label_set_text(id(cp_date_l), t.is_valid() ? t.strftime("%a  %Y-%m-%d").c_str() : "");
+                  shub::set_text(id(cp_date_l), shub::date_str(t).c_str());
                   shub::layout(id(shub_mode), id(shub_pin).data());
                   shub::refresh(id(units_imperial));
               - script.execute: shub_refresh
@@ -5984,19 +5984,21 @@ lvgl:
             text_font: font_clock
             text_color: 0x00E66E
             clickable: true
-            on_click:
-              - lvgl.page.show: main_page
+            on_click:   # 點時鐘切換大時鐘模式(回雷達用 RADAR 鈕)
+              - switch.toggle: shub_big_sw
         - label:
-            id: cp_date_l
+            id: cp_date_l   # 位置由 shub::set_big() 決定
             x: 33
             y: 105
             text: ""
-            text_font: font_small
-            text_color: 0x6E8273
+            text_font: font_date
+            text_color: 0x9FB8A6
         # 只用來把字型交給 C++(shub::build 讀它們的字型),不顯示
         - label: { id: cp_valfont_l, hidden: true, text: "0", text_font: font_value }
         - label: { id: cp_tinyfont_l, hidden: true, text: "0", text_font: font_tiny }
-        - line: { points: ["10, 145", "990, 145"], line_color: 0x003820, line_width: 1 }
+        - label: { id: cp_namefont_l, hidden: true, text: "0", text_font: font_small }
+        - label: { id: cp_xlfont_l, hidden: true, text: "0", text_font: font_clock_xl }
+        - line: { id: cp_sep, points: ["10, 145", "990, 145"], line_color: 0x003820, line_width: 1 }
         - button:
             id: cp_grid
             x: 565
@@ -6834,7 +6836,7 @@ lvgl:
                   // 進頁面當下就排版 + 填值,不等下一次 5 秒刷新
                   auto t = id(rtc_time).now();
                   lv_label_set_text(id(cp_time_l), t.strftime("%H:%M:%S").c_str());
-                  lv_label_set_text(id(cp_date_l), t.is_valid() ? t.strftime("%a  %Y-%m-%d").c_str() : "");
+                  shub::set_text(id(cp_date_l), shub::date_str(t).c_str());
                   shub::layout(id(shub_mode), id(shub_pin).data());
                   shub::refresh(id(units_imperial));
               - script.execute: shub_refresh
