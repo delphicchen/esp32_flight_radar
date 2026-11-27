@@ -1879,7 +1879,40 @@ inline void radar_fill_spec(lv_obj_t *img, lv_obj_t *l0, lv_obj_t *l1, lv_obj_t 
   radar_sil_set(img, sil, s ? s->span_dm : 0);
 }
 
-// ---- 系統資訊(SYS 鈕):CPU / RAM / PSRAM / FLASH / 運行時間 / API 額度 填入右下角 label ----
+// ---- SYS 面板的 FPS / CPU:同 LVGL perf monitor 的算法,但不在畫面角落另開標籤 ----
+// FPS = 最近這段時間「每幀渲染耗時」換算成每秒可畫幾幀(只算 >5000px 的幀),
+// 上限 = 刷新週期(30ms → 33);沒在重繪時顯示上限。CPU = 100 - LVGL 計時器閒置率。
+namespace perf {
+inline uint32_t g_elaps = 0, g_frames = 0;
+inline void (*g_prev)(lv_disp_drv_t *, uint32_t, uint32_t) = nullptr;
+inline bool g_hooked = false;
+// 接在 LVGL 每次刷新完成的 monitor_cb 上(串接原本的回呼,不蓋掉)
+inline void hook() {
+  if (g_hooked) return;
+  lv_disp_t *d = lv_disp_get_default();
+  if (!d || !d->driver) return;
+  g_hooked = true;
+  g_prev = d->driver->monitor_cb;
+  d->driver->monitor_cb = [](lv_disp_drv_t *drv, uint32_t t, uint32_t px) {
+    if (px > 5000) { g_elaps += t; g_frames++; }
+    if (g_prev) g_prev(drv, t, px);
+  };
+}
+// 取一次讀數並歸零(SYS 面板每秒呼叫)
+inline void read(uint32_t &fps, uint32_t &cpu) {
+  hook();
+  lv_disp_t *d = lv_disp_get_default();
+  uint32_t lim = (d && d->refr_timer && d->refr_timer->period) ? 1000 / d->refr_timer->period
+                                                                : 1000 / LV_DISP_DEF_REFR_PERIOD;
+  uint32_t f = g_frames ? 1000 * g_frames / (g_elaps ? g_elaps : 1) : lim;
+  fps = f > lim ? lim : f;
+  g_frames = 0;
+  g_elaps = 0;
+  cpu = 100 - lv_timer_get_idle();
+}
+}  // namespace perf
+
+// ---- 系統資訊(SYS 鈕):CPU / RAM / PSRAM / FLASH / FPS 填入右下角 label ----
 // sq(SQUAWK 列)在系統資訊模式下挪給 MAP 狀態專用:800x480 右下面板只有
 // 292px 寬(font_mono 一字 11.3px ≈ 26 字),「FLASH .. APP .. MAP ..」塞同一行
 // 會被螢幕右緣切掉——切掉的偏偏就是要使用者回報的 MAP 欄位(issue #7)。
@@ -1926,17 +1959,8 @@ inline void radar_show_sysinfo(lv_obj_t *cs, lv_obj_t *route, lv_obj_t *sq,
   snprintf(b, sizeof(b), "FLASH %u MB  APP %.1f MB",
            (unsigned) (fsz >> 20), ap ? ap->size / 1048576.0f : 0.0f);
   lv_label_set_text(l3, b);
-  uint32_t up = (uint32_t) (esp_timer_get_time() / 1000000LL);
-  if (radar_bg::g_last_src > 0)   // 免費來源(手選或 fallback):無額度,顯示來源名
-    snprintf(b, sizeof(b), "UP %ud %02u:%02u   SRC %s", (unsigned) (up / 86400),
-             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
-             radar_bg::g_last_src == 2 ? "ADSB.LOL" : "A.LIVE");
-  else if (radar_bg::g_os_remaining >= 0)
-    snprintf(b, sizeof(b), "UP %ud %02u:%02u   API %d", (unsigned) (up / 86400),
-             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60),
-             radar_bg::g_os_remaining);   // OpenSky 當日剩餘呼叫額度
-  else
-    snprintf(b, sizeof(b), "UP %ud %02u:%02u   API ----", (unsigned) (up / 86400),
-             (unsigned) (up / 3600 % 24), (unsigned) (up / 60 % 60));
+  uint32_t fps, cpu;
+  perf::read(fps, cpu);
+  snprintf(b, sizeof(b), "FPS %3u   CPU %3u%%", (unsigned) fps, (unsigned) cpu);
   lv_label_set_text(l4, b);
 }

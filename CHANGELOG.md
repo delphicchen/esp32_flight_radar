@@ -3,6 +3,28 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.4.1] — 2026-11-27
+
+### Added
+
+- **Large clock** (#24, S3 boards). Tap the time on the clock page to switch to a large, centered
+  clock with one row of up to 3 cards; tap again to switch back. Also the *Large Clock* switch in
+  the web UI, kept across reboots. **Tapping the time no longer returns to the radar; use RADAR.**
+- **Outdoor pressure** (#24). The local weather now also gives sea-level pressure, shown as an
+  OUTDOOR PRESSURE card (*Sensor Slot* option *OUTDOOR PRES*). Saved slot choices and alert
+  thresholds carry over.
+- **FPS and CPU in the SYS panel.** They replace the uptime / data-source row.
+
+### Changed
+
+- **Bigger date on the clock page**, under the buttons, as `Nov. 27 2026 (Fri)`.
+- **Much faster radar sweep.** Each frame used to redraw from the corner of the screen to the tip
+  of the sweep line, up to the whole radar. It now redraws only the area the line covers. On the
+  generic 800×480 board, the radar page went from 8–22 FPS at 98% CPU to 33 FPS at 50–80%.
+- All S3 boards are built for speed (-O2) instead of size; LVGL uses the C library's memcpy.
+- The clock page only redraws values that changed.
+- Generic 800×480: the LVGL draw buffer moved to internal RAM, like the other S3 boards.
+
 ## [v1.4.0] — 2026-11-21
 
 ### Added
