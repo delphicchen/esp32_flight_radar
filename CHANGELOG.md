@@ -3,6 +3,26 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.4.4] — 2026-11-28
+
+Prebuilt image for the P4 (`v1.4.4-p4`). The S3 boards get the same features as v1.4.1.
+
+### Added
+
+- **Large clock** (#24). Tap the time on the clock page to switch to a large, centered clock with
+  one row of up to 3 cards; tap again to switch back. Also the *Large Clock* switch in the web UI,
+  kept across reboots. **Tapping the time no longer returns to the radar; use RADAR.**
+- **Outdoor pressure** (#24). The local weather now also gives sea-level pressure, shown as an
+  OUTDOOR PRESSURE card. Saved slot choices and alert thresholds carry over.
+- **FPS and CPU in the SYS panel.** They replace the uptime / data-source row.
+
+### Changed
+
+- **Bigger date on the clock page**, under the buttons, as `Nov. 27 2026 (Fri)`.
+- **Faster radar sweep.** Each frame used to redraw from the corner of the screen to the tip of
+  the sweep line; it now redraws only the area the line covers.
+- Built for speed (-O2) instead of size. The clock page only redraws values that changed.
+
 ## [v1.4.3] — 2026-11-21
 
 Prebuilt image for the P4 (`v1.4.3-p4`). The S3 boards get the same features as v1.4.0.

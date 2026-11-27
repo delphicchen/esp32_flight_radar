@@ -94,10 +94,16 @@ esphome:
             id(shub_mode) = M[mi];
             id(shub_grid_sel)->publish_state((size_t) mi);
             shub::build(id(clock_page)->obj, ${disp_w}, ${disp_h},
-                        lv_obj_get_style_text_font(id(cp_date_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_namefont_l), LV_PART_MAIN),
                         lv_obj_get_style_text_font(id(cp_valfont_l), LV_PART_MAIN),
                         lv_obj_get_style_text_font(id(cp_tinyfont_l), LV_PART_MAIN),
                         lv_obj_get_style_text_font(id(wifi_icon), LV_PART_MAIN));   // Montserrat:齒輪符號
+            // 時鐘頁頂端(時間/日期/分隔線)也由 C++ 排,一般/大時鐘兩種模式共用
+            shub::clock_init((lv_obj_t *) id(cp_time_l), (lv_obj_t *) id(cp_date_l), id(cp_sep)->obj,
+                             lv_obj_get_style_text_font(id(cp_time_l), LV_PART_MAIN),
+                             lv_obj_get_style_text_font(id(cp_xlfont_l), LV_PART_MAIN));
+            shub::set_big(id(shub_big));
+            id(shub_big_sw).publish_state(id(shub_big));
             // 卡片齒輪選單選定 → 走該格 select 的 set_action(寫 NVS、同步網頁、重排)
             shub::g_on_pick = [](int slot, int val) {
               select::Select *SS[6] = { id(shub_slot0_sel), id(shub_slot1_sel), id(shub_slot2_sel),
@@ -295,7 +301,7 @@ time:
               if (lv_scr_act() != id(clock_page)->obj) return;
               auto t = id(rtc_time).now();
               lv_label_set_text(id(cp_time_l), t.strftime("%H:%M:%S").c_str());
-              lv_label_set_text(id(cp_date_l), t.is_valid() ? t.strftime("%a  %Y-%m-%d").c_str() : "");
+              shub::set_text(id(cp_date_l), shub::date_str(t).c_str());
       - seconds: 0           # 每分鐘檢查鬧鐘
         then:
           - lambda: |-
@@ -601,7 +607,7 @@ select:
     name: Sensor Slot 1
     id: shub_slot0_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot0_sel).index_of(x);
@@ -614,7 +620,7 @@ select:
     name: Sensor Slot 2
     id: shub_slot1_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot1_sel).index_of(x);
@@ -627,7 +633,7 @@ select:
     name: Sensor Slot 3
     id: shub_slot2_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot2_sel).index_of(x);
@@ -640,7 +646,7 @@ select:
     name: Sensor Slot 4
     id: shub_slot3_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot3_sel).index_of(x);
@@ -653,7 +659,7 @@ select:
     name: Sensor Slot 5
     id: shub_slot4_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot4_sel).index_of(x);
@@ -666,7 +672,7 @@ select:
     name: Sensor Slot 6
     id: shub_slot5_sel
     entity_category: config
-    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4"]
+    options: ["AUTO", "OUTDOOR TEMP", "OUTDOOR HUM", "INDOOR TEMP", "INDOOR HUM", "PRESSURE", "CO2", "HA 1", "HA 2", "HA 3", "HA 4", "OUTDOOR PRES"]
     set_action:
       - lambda: |-
           auto i = id(shub_slot5_sel).index_of(x);
@@ -757,6 +763,7 @@ globals:
   - { id: lbl_side, type: 'std::vector<uint8_t>' }        # 各槽標籤位置 0=右 1=左(避開向量線)
   # #24 時鐘/感測器頁:格數 0=AUTO 或 1/2/3/4/6;各格指定 0=自動、1..10 = shub::Key+1
   - { id: shub_mode, type: int, restore_value: true, initial_value: '0' }
+  - { id: shub_big, type: bool, restore_value: true, initial_value: 'false' }   # 時鐘頁大時鐘模式
   - { id: shub_pin, type: 'std::vector<int>' }   # 開機時由下面 6 個 NVS 值組成
   - { id: shub_p0, type: int, restore_value: true, initial_value: '0' }
   - { id: shub_p1, type: int, restore_value: true, initial_value: '0' }
@@ -1383,6 +1390,18 @@ script:
 # ---- 掃描線開關(網頁版):與設定頁 RADAR SWEEP 按鈕是同一個設定(#21)----
 # 真正存 NVS 的是 sweep_on(globals),這裡只是鏡像,所以不設 restore_mode 還原。
 switch:
+  - platform: template        # #24 時鐘頁大時鐘模式(點時鐘也會切換)
+    name: Large Clock
+    id: shub_big_sw
+    entity_category: config
+    restore_mode: DISABLED      # 狀態存在 shub_big
+    lambda: 'return id(shub_big);'
+    turn_on_action:
+      - lambda: 'id(shub_big) = true; shub::set_big(true);'
+      - script.execute: shub_refresh
+    turn_off_action:
+      - lambda: 'id(shub_big) = false; shub::set_big(false);'
+      - script.execute: shub_refresh
   - platform: template
     name: Radar Sweep
     id: sweep_switch
@@ -1593,10 +1612,11 @@ interval:
           if (radar_bg::g_wx_ready) {
             xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
             radar_bg::g_wx_ready = false;
-            float wt = radar_bg::g_wx.temp, wh = radar_bg::g_wx.hum;
+            float wt = radar_bg::g_wx.temp, wh = radar_bg::g_wx.hum, wp = radar_bg::g_wx.pres;
             xSemaphoreGive(radar_bg::mtx());
             shub::set(shub::OUT_T, wt);   // #24 時鐘頁 OUTDOOR 卡片
             shub::set(shub::OUT_H, wh);
+            shub::set(shub::OUT_P, wp);
             if (id(sel_cs_g).empty())
               id(show_weather).execute();
           }
@@ -2099,12 +2119,22 @@ interval:
           if (!dark && sw) {
             lv_obj_t *lines[5] = { id(sweep_line)->obj,
                                    id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
+            // lv_line 的物件大小是「原點 (0,0) 到最遠的點」(lv_line.c GET_SELF_SIZE),
+            // 物件放在頁面原點時,每幀失效的是「頁面左上角到線尾」整塊——指向右下時
+            // 等於整個雷達重畫,平均約是線外接矩形的 4 倍。改成每幀把物件移到線的
+            // 外接矩形左上角、點用相對座標,失效範圍就只剩外接矩形(新舊位置各一)。
             static lv_point_precise_t lp[5][2];   // LVGL 9 的 line 點座標型別
+            const lv_coord_t cx = RS(240), cy = RS(240);
             for (int k = 0; k < 5; k++) {
               float a = (cur - TAIL_DEG[k]) * DEG;    // 第0條=掃描線,其後依序後退
-              lp[k][0].x = RS(240); lp[k][0].y = RS(240);
-              lp[k][1].x = RS(240) + (lv_coord_t) ((float) RADAR_R * sinf(a));
-              lp[k][1].y = RS(240) - (lv_coord_t) ((float) RADAR_R * cosf(a));
+              lv_coord_t tx = cx + (lv_coord_t) ((float) RADAR_R * sinf(a));
+              lv_coord_t ty = cy - (lv_coord_t) ((float) RADAR_R * cosf(a));
+              // 線寬的一半往外留邊,點才不會是負座標(線頭會畫出物件框外被裁掉)
+              lv_coord_t m = lv_obj_get_style_line_width(lines[k], LV_PART_MAIN) / 2 + 1;
+              lv_coord_t ox = LV_MIN(cx, tx) - m, oy = LV_MIN(cy, ty) - m;
+              lp[k][0].x = cx - ox; lp[k][0].y = cy - oy;
+              lp[k][1].x = tx - ox; lp[k][1].y = ty - oy;
+              lv_obj_set_pos(lines[k], ox, oy);
               lv_line_set_points(lines[k], lp[k], 2);
             }
           }
@@ -2220,6 +2250,14 @@ font:
     id: font_value              # #24 感測器卡片的大數字
     size: ${f_value}
     glyphs: "0123456789.-"
+  - file: "gfonts://Roboto Condensed@700"
+    id: font_clock_xl           # #24 時鐘頁大時鐘模式
+    size: ${f_clock_xl}
+    glyphs: "0123456789:-"
+  - file: "gfonts://Roboto Condensed"
+    id: font_date               # #24 時鐘頁日期:Nov. 27 2026 (Fri)
+    size: ${f_date}
+    glyphs: "0123456789.() ADFJMNOSTWabcdeghilnoprtuvy"
   - file: "gfonts://Roboto Mono"
     id: font_mono
     size: ${f_mono}

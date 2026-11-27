@@ -20,6 +20,8 @@ substitutions:
   f_mono: "23"
   f_tiny: "18"
   f_value: "58"     # #24 感測器卡片大數字
+  f_clock_xl: "176"  # #24 時鐘頁大時鐘模式的時間
+  f_date: "45"      # #24 時鐘頁日期
 
 packages:
   core:  !include common/core.yaml
