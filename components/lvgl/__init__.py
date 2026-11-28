@@ -213,6 +213,9 @@ async def to_code(configs):
     add_define("LV_DRAW_COMPLEX", "1")
     # 本地覆寫:LVGL 自帶的 lv_memcpy 是逐字搬;改用 libc 版(不透明 blit 逐行都在 copy)
     add_define("LV_MEMCPY_MEMSET_STD", "1")
+    # 本地覆寫:待重畫區清單 32 → 64 格。滿了 LVGL 會改成整屏重畫(lv_refr.c);掃描線切段 + 每秒
+    # 航班更新疊在同一幀時會超過 32,5B 上就是一幀 61 萬像素、385ms 的大卡頓。每格只多 9 bytes。
+    add_define("LV_INV_BUF_SIZE", "64")
     add_define("LV_TICK_CUSTOM", "1")
     add_define("LV_TICK_CUSTOM_INCLUDE", '"esphome/components/lvgl/lvgl_hal.h"')
     add_define("LV_TICK_CUSTOM_SYS_TIME_EXPR", "(lv_millis())")

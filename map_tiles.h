@@ -44,6 +44,11 @@ static const char TAG[] = "maptiles";
 
 static const uint32_t MAGIC = 0x544D5246;  // "FRMT" little-endian
 static const uint16_t FORMAT_VERSION = 1;
+// 圖資版次:放在 StoreHeader.version 的高位元組(低位元組仍是 FORMAT_VERSION,舊的存檔照樣讀得到)。
+// 伺服器上的圖磚內容改了就加一:存著的版次較舊時,開機仍先載入顯示,但不算「已下載」,
+// 連上網後會在背景重抓一次(core.yaml 的 maps_key)。
+//   1 = 台灣縣市界改標成種類 3(原本是 0,跟海岸線分不開;v1.5.1 的海岸線餘暉需要)
+static const uint8_t MAPS_REV = 1;
 static const uint16_t FLAG_COMPLETE = 1;
 static const size_t HEADER_SIZE = 64;
 
@@ -78,6 +83,7 @@ inline bool loaded = false;               // false = no map yet (nothing drawn)
 // wasted bandwidth and needless flash wear for a map it already has.
 inline float stored_lat = NAN, stored_lon = NAN;
 inline uint8_t stored_level = 0;
+inline uint8_t stored_rev = 0;   // 存檔的圖資版次(MAPS_REV)
 inline int stored_tiles = 0;   // 成功解析的圖磚數,給設定頁顯示用
 
 // Bumped whenever the arrays change. radar_rebuild_base() caches the rendered
@@ -264,7 +270,7 @@ inline bool load_from_partition() {
   // complete must be exactly 1. Erased flash reads 0xFFFF, and the downloader
   // leaves it that way until every tile is written, so `!h.complete` would let
   // a half-finished store through.
-  if (h.magic != MAGIC || h.version != FORMAT_VERSION || h.complete != FLAG_COMPLETE) {
+  if (h.magic != MAGIC || (h.version & 0xFF) != FORMAT_VERSION || h.complete != FLAG_COMPLETE) {
     ESP_LOGI(TAG, "no stored map yet");
     return false;
   }
@@ -300,6 +306,7 @@ inline bool load_from_partition() {
   heap_caps_free(buf);
   finish();
   stored_lat = h.lat; stored_lon = h.lon; stored_level = h.level;
+  stored_rev = (uint8_t) (h.version >> 8);
   stored_tiles = good;
   ESP_LOGI(TAG, "map: %d/%d tiles, %u outline pts, %u airports, %u airspaces "
                 "(for %.3f,%.3f r=%ukm L%u)",
@@ -329,7 +336,7 @@ inline bool store_begin(const esp_partition_t *part, float lat, float lon,
 
   StoreHeader h{};
   h.magic = MAGIC;
-  h.version = FORMAT_VERSION;
+  h.version = (uint16_t) (FORMAT_VERSION | (MAPS_REV << 8));
   h.complete = 0xFFFF;          // stays erased until finalize()
   h.lat = lat; h.lon = lon;
   h.range_km = range_km;

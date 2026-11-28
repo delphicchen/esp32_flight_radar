@@ -10,6 +10,11 @@
 #   • OTA:改韌體走 WiFi,esphome run 會自動選
 # =============================================================
 
+substitutions:
+  # 掃描線動畫的更新間隔。1024x600 的 S3 板(5B、7B)在入口檔改成 60ms:面板像素時脈 30MHz,
+  # 光面板掃描就吃掉約 60MB/s 的 PSRAM 頻寬,雷達畫布又大 1.56 倍,30ms 一幀時 CPU 頂滿、只剩 16–23 FPS
+  sweep_ms: 30ms
+
 esphome:
   name: flight-radar
   friendly_name: Flight Radar
@@ -25,6 +30,7 @@ esphome:
     - track_hist.h         # #22 選中航班的完整航跡歷史
     - sensors_hub.h        # #24 時鐘/感測器頁:數值登記 + 24h 曲線 + 卡片排版
     - ctrl_hub.h           # 時鐘頁 CTRL 模式:HA 裝置控制卡片(PLAN_CTRL.md)
+    - sweep_fx.h           # 掃描線 CRT 餘暉:漸層扇形 + 飛機被掃到後的長餘暉
     - sensors_i2c.h        # #24 I2C 本地感測器自動偵測(匯流排 id: sens_i2c,見各板檔)
   on_boot:
     priority: -100
@@ -36,10 +42,13 @@ esphome:
           if (maptiles::load_from_partition()) {
             // 已經有地圖就把節流 key 補起來 —— maps_key 是 RAM global、開機歸零,
             // 不補的話每次重開機都會把同一份圖磚重抓一遍(實機上實際發生過)。
-            char k[48];
-            snprintf(k, sizeof(k), "%.1f,%.1f,L%d", maptiles::stored_lat,
-                     maptiles::stored_lon, (int) maptiles::stored_level);
-            id(maps_key) = k;
+            // 圖資版次較舊(伺服器上的圖磚改過):照樣顯示,但不補 key,連上網後背景重抓一次
+            if (maptiles::stored_rev >= maptiles::MAPS_REV) {
+              char k[48];
+              snprintf(k, sizeof(k), "%.1f,%.1f,L%d", maptiles::stored_lat,
+                       maptiles::stored_lon, (int) maptiles::stored_level);
+              id(maps_key) = k;
+            }
           }
           // 回波透明度(#23):在重建底圖前交給合成程式
           id(echo_opa) = std::max(20, std::min(100, id(echo_opa)));
@@ -236,8 +245,15 @@ esphome:
           // SRC / UNIT 下拉:同步到 NVS 還原的值(設定頁未開過也要正確)
           lv_dropdown_set_selected(id(src_dd)->obj, id(data_src));
           lv_dropdown_set_selected(id(unit_dd)->obj, id(units_imperial) ? 1 : 0);
+          // CRT 餘暉扇形:緊貼底圖之上;要在 sweep_apply 之前建好,開關狀態才套得上
+          coastfx::create((lv_obj_t *) id(base_canvas));   // 掃描效果:單一物件,緊貼底圖之上
+          clocksplit::create(id(clock_label));              // 大時鐘拆成 時:分 + :秒
+          #ifdef PERF_SLOW_LOG
+          perf::hook();   // DIAG:開機就接上,不必等打開 SYS 面板
+          #endif
       - script.execute: atc_panel_sync
       - script.execute: sweep_apply
+      - script.execute: sweep_per_apply
       - script.execute: list_apply   # #22:list_on 自 NVS 還原,開機就回到上次的右欄模式
       - lambda: |-
           #if !RADAR_BL_PWM
@@ -310,9 +326,10 @@ time:
     on_time:
       - seconds: '*'          # 每秒更新時鐘(LVGL 只重繪時鐘那塊區域)
         then:
-          - lvgl.label.update:
-              id: clock_label
-              text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
+          - lambda: |-
+              // 時:分 與 :秒 分開(sweep_fx.h 的 clocksplit),每秒只重畫秒數那一小塊
+              auto t = id(rtc_time).now();
+              clocksplit::set(t.strftime("%H:%M").c_str(), t.strftime(":%S").c_str());
           - lvgl.label.update:      # #22 列表模式的小時鐘(藏著時更新也只是改字串)
               id: list_clock_l
               text: !lambda 'return id(rtc_time).now().strftime("%H:%M:%S");'
@@ -669,6 +686,18 @@ select:
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           id(tz_select).publish_state(*i);
 
+  # 掃描線轉一圈的時間:機場近場 ASR 約 4.8 秒、航路 ARSR 約 12 秒(預設);設定頁的按鈕也走這裡
+  - platform: template
+    name: Sweep Period
+    id: sweep_per_sel
+    entity_category: config
+    options: ["4.8 s (ASR)", "6 s", "12 s (ARSR)"]
+    set_action:
+      - lambda: |-
+          auto i = id(sweep_per_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(sweep_per) = (int) *i;
+      - script.execute: sweep_per_apply
   # 時鐘頁卡片區:SENSOR(感測器曲線)/ CTRL(HA 裝置控制);畫面上的按鈕與左右滑動也走這裡
   - platform: template
     name: Clock Cards
@@ -808,7 +837,6 @@ globals:
   - { id: poll_tick,   type: int,      initial_value: '0' }
   - { id: sweep_angle, type: float,    initial_value: '0' }
   - { id: slot_angle, type: 'std::vector<float>' }   # 各槽方位角(度,-1=隱藏)
-  - { id: slot_glow,  type: 'std::vector<float>' }   # 各槽掃描高亮 0~1
   # 新燒錄預設開地圖與回波(#23:新使用者以為沒有地圖);已存過的裝置照 NVS
   - id: map_on
     type: bool
@@ -863,6 +891,7 @@ globals:
   - { id: shub_mode, type: int, restore_value: true, initial_value: '0' }
   - { id: shub_big, type: bool, restore_value: true, initial_value: 'false' }   # 時鐘頁大時鐘模式
   - { id: shub_ctrl, type: bool, restore_value: true, initial_value: 'false' }  # 時鐘頁卡片區:false=SENSOR true=CTRL
+  - { id: sweep_per, type: int, restore_value: true, initial_value: '2' }      # 掃描一圈:0=4.8s 1=6s 2=12s
   - { id: shub_pin, type: 'std::vector<int>' }   # 開機時由下面 6 個 NVS 值組成
   - { id: shub_p0, type: int, restore_value: true, initial_value: '0' }
   - { id: shub_p1, type: int, restore_value: true, initial_value: '0' }
@@ -1026,8 +1055,9 @@ script:
           // 把手:收合時在分隔線上(▲=把控制項收起),展開時移到小時鐘下方的翻頁列(▼=放回控制項)
           lv_obj_set_y((lv_obj_t *) id(list_handle), on ? RS(52) : RS(186));
           // 大時鐘藏起來,改用左上角的小時鐘(on_time 每秒兩個都更新)
-          if (on) { lv_obj_add_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_clear_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
-          else    { lv_obj_clear_flag(id(clock_label), LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN); }
+          clocksplit::show(!on);   // 大時鐘(時:分 + :秒 兩個標籤)
+          if (on) lv_obj_clear_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN);
+          else    lv_obj_add_flag(id(list_clock_l), LV_OBJ_FLAG_HIDDEN);
           lv_label_set_text(id(list_handle_l), on ? LV_SYMBOL_DOWN : LV_SYMBOL_UP);
       - script.execute: atc_panel_sync
       - script.execute: strips_update
@@ -1202,6 +1232,18 @@ script:
           if (url.empty()) url = "http://homeassistant.local:8123";
           radar_bg::request_ha_vals(url, id(ha_token).state, ids);
 
+  - id: sweep_per_apply        # 掃描轉速套用:掃描線與飛機餘暉、設定頁按鈕字、網頁選單
+    mode: single
+    then:
+      - lambda: |-
+          static const uint32_t MS[3] = {4800, 6000, 12000};
+          static const char *const TXT[3] = {"4.8 s / TURN", "6 s / TURN", "12 s / TURN"};
+          int p = id(sweep_per);
+          if (p < 0 || p > 2) p = 2;
+          sweepfx::g_period = MS[p];
+          lv_label_set_text(id(sweep_per_l), TXT[p]);
+          id(sweep_per_sel)->publish_state((size_t) p);
+
   - id: ctl_poll               # 時鐘頁 CTRL:讀選定實體的狀態(只在 CTRL 顯示中;背景請求)
     mode: single
     then:
@@ -1296,12 +1338,7 @@ script:
           else    lv_obj_clear_state(btn, LV_STATE_CHECKED);
           lv_obj_set_style_text_color(id(sweep_btn_l), lv_color_hex(on ? 0x04180C : 0x00C060), 0);
           // 關掉時整組線隱藏;interval 那邊也不再更新端點,飛機輝度自然衰減回基底色
-          lv_obj_t *lines[5] = { id(sweep_line)->obj,
-                                 id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
-          for (auto *l : lines) {
-            if (on) lv_obj_clear_flag(l, LV_OBJ_FLAG_HIDDEN);
-            else    lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
-          }
+          coastfx::set_static(!on);   // 沒有掃描線:不畫掃描線 / 扇形,海岸線全部用原色
           id(sweep_switch).publish_state(on);
 
   - id: atc_panel_sync         # 右下面板同步:ATC 圖層面板、SYS 分頁列、亮度滑桿
@@ -2107,11 +2144,12 @@ interval:
               }
             }
             // 圖示中心對準位置(左置標籤時符號在容器右側)
-            lv_obj_set_pos(marks[shown], lside ? px - RS(108) : px - RS(14), py - RS(20));
+            // 以下 setter 一律「值有變才設」(sweep_fx.h 的 lvq):LVGL 8 同值也會失效整個標記容器
+            lvq::pos(marks[shown], lside ? px - RS(108) : px - RS(14), py - RS(20));
             lv_img_set_angle(imgs[shown], ((int16_t)(id(ac_trk)[i] * 10.0f)) % 3600);
             bool selg = (!id(sel_cs_g).empty() && id(ac_cs)[i] == id(sel_cs_g));
-            lv_obj_set_style_img_recolor(imgs[shown], lv_color_hex(selg ? 0xFFD24A : 0x40FF9A), 0);
-            lv_obj_set_style_img_recolor_opa(imgs[shown], LV_OPA_COVER, 0);
+            lvq::recolor(imgs[shown], sweepfx::color(selg, sweepfx::g_lvl[shown]));
+            lvq::recolor_opa(imgs[shown], LV_OPA_COVER);
             earr[shown] = e; noarr[shown] = no; selarr[shown] = selg;
             // 訊號延遲:last_contact 超過 60 秒沒更新
             bool stale = false;
@@ -2121,11 +2159,11 @@ interval:
               stale = (now_epoch > lc) && (now_epoch - lc > 60);
             }
             if (atc) {
-              lv_obj_add_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
-              lv_obj_clear_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
+              lvq::show(imgs[shown], false);
+              lvq::show(sqs[shown], true);
               uint32_t basecol = selg ? 0xFFFFFF : (stale ? 0xFFCC00 : 0x00FF41);
-              lv_obj_set_style_bg_color(sqs[shown], lv_color_hex(basecol), 0);
-              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(basecol), 0);
+              lvq::bg_color(sqs[shown], lv_color_hex(basecol));
+              lvq::text_color(dbs[shown], lv_color_hex(basecol));
               // 速度向量線:未來 120 秒推算位置,超出雷達圈就沿方向 clamp 回圓周上
               float vkm2 = id(ac_vel)[i] * 120.0f / 1000.0f;
               float e2 = e + vkm2 * sinf(rad);
@@ -2137,8 +2175,8 @@ interval:
               static lv_point_t vp[AC_SLOTS][2];
               vp[shown][0].x = px;  vp[shown][0].y = py;
               vp[shown][1].x = px2; vp[shown][1].y = py2;
-              lv_line_set_points(vecs[shown], vp[shown], 2);
-              lv_obj_clear_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
+              lineutil::set_points(vecs[shown], vp[shown], 2);   // 只失效線的外接矩形(見 sweep_fx.h)
+              lvq::show(vecs[shown], true);
               // 歷史軌跡點線:每段歷史放中點+端點兩顆小圓點(至多 6 顆,漸淡),
               // 與實線向量做出視覺區隔。trail 依資料索引 i 儲存(0=最新),首個無效點即停
               {
@@ -2152,22 +2190,22 @@ interval:
                   if (te * te + tn * tn > rng * rng) break;
                   int tx = RS(240) + (int) (te / rng * (float) RADAR_R);
                   int ty = RS(240) - (int) (tn / rng * (float) RADAR_R);
-                  lv_obj_set_pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
-                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  lvq::pos(trs[shown][d], (lx + tx) / 2 - 1, (ly + ty) / 2 - 1);
+                  lvq::show(trs[shown][d], true);
                   d++;
-                  lv_obj_set_pos(trs[shown][d], tx - 1, ty - 1);
-                  lv_obj_clear_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                  lvq::pos(trs[shown][d], tx - 1, ty - 1);
+                  lvq::show(trs[shown][d], true);
                   d++;
                   lx = tx; ly = ty;
                 }
-                for (; d < 6; d++) lv_obj_add_flag(trs[shown][d], LV_OBJ_FLAG_HIDDEN);
+                for (; d < 6; d++) lvq::show(trs[shown][d], false);
               }
             } else {
-              lv_obj_clear_flag(imgs[shown], LV_OBJ_FLAG_HIDDEN);
-              lv_obj_add_flag(sqs[shown], LV_OBJ_FLAG_HIDDEN);
-              lv_obj_add_flag(vecs[shown], LV_OBJ_FLAG_HIDDEN);
-              for (int k = 0; k < 6; k++) lv_obj_add_flag(trs[shown][k], LV_OBJ_FLAG_HIDDEN);
-              lv_obj_set_style_text_color(dbs[shown], lv_color_hex(0x9AE6B4), 0);   // 還原預設標籤色
+              lvq::show(imgs[shown], true);
+              lvq::show(sqs[shown], false);
+              lvq::show(vecs[shown], false);
+              for (int k = 0; k < 6; k++) lvq::show(trs[shown][k], false);
+              lvq::text_color(dbs[shown], lv_color_hex(0x9AE6B4));   // 還原預設標籤色
             }
             char db[48];
             if (atc) {
@@ -2189,12 +2227,11 @@ interval:
             if (strcmp(lv_label_get_text(dbs[shown]), db) != 0)
               lv_label_set_text(dbs[shown], db);
             if (id(slot_angle).size() != AC_SLOTS) id(slot_angle).assign(AC_SLOTS, -1.0f);
-            if (id(slot_glow).size() != AC_SLOTS) id(slot_glow).assign(AC_SLOTS, 0.0f);
             float bearing = atan2f(e, no) * 57.29578f;   // 0=北,順時針
             if (bearing < 0) bearing += 360.0f;
             id(slot_angle)[shown] = bearing;
             id(slot_map)[shown] = i;
-            lv_obj_clear_flag(marks[shown], LV_OBJ_FLAG_HIDDEN);
+            lvq::show(marks[shown], true);   // 已經顯示就不要再 clear(LVGL 8 會失效整個容器)
             shown++;
           }
           // STCA:兩兩比對水平距離 < 5.5km 且高度差 < 300m → 衝突告警(紅色,選取中則紅白交替)
@@ -2265,7 +2302,7 @@ interval:
               for (int a = 0, b = np - 1; a < b; a++, b--) std::swap(tp[a], tp[b]);
             }
             if (np >= 2) {
-              lv_line_set_points(ln, tp, np);
+              lineutil::set_points(ln, tp, np);   // 只失效線的外接矩形(見 sweep_fx.h)
               lv_obj_clear_flag(ln, LV_OBJ_FLAG_HIDDEN);
             } else {
               lv_obj_add_flag(ln, LV_OBJ_FLAG_HIDDEN);
@@ -2274,11 +2311,11 @@ interval:
       # #22 列表模式 → 每秒重排 strip(距離、高度會變);延後 300ms,避開上面航機更新那一輪重繪
       - delay: 300ms
       - lambda: 'if (id(list_on)) id(strips_update).execute();'
-  # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;6 秒轉一圈,角度用時間基準→不受幀率漂移)
-  - interval: 30ms
+  # 掃描線動畫(對齊 LVGL 30ms 刷新節拍,避免拍頻頓挫;一圈的時間見 Sweep Period,角度用時間基準→不受幀率漂移)
+  - interval: ${sweep_ms}
     then:
       - lambda: |-
-          const float PERIOD = 6000.0f;            // 一圈毫秒數
+          const float PERIOD = (float) sweepfx::g_period;   // 一圈毫秒數(Sweep Period,預設 12 秒)
           uint32_t now = millis();
           float prev = id(sweep_angle);
           float cur = fmodf((float) now / PERIOD * 360.0f, 360.0f);
@@ -2291,37 +2328,17 @@ interval:
           const bool dark = !id(backlight).current_values.is_on();
           const bool sw = id(sweep_on);            // 關掉掃描線(#21):不畫線、不觸發飛機高亮
           const float DEG = 3.14159265f / 180.0f;
-          // 掃描線 + 4 條尾巴一起算(共用三角函式基準,減少重複)。
-          // 尾巴從 8 條減半成 4 條:每幀最貴的是 lv_draw_line,LVGL 在「線的外接
-          // 矩形」上跑遮罩混色,45° 時那塊約 160x160,而所有線的矩形幾乎完全重疊,
-          // 同一片區域被反覆混色。條數減半 = 這一項直接減半。
-          // 角度不是等距的 k*2°:那樣第一條尾巴會離掃描線 2°,外緣多出約 2px 的
-          // 縫。改成 1.75° 起跳、間隔 2°,扇形的內外緣位置和原本 1°~8° 幾乎一致。
-          static const float TAIL_DEG[5] = { 0.0f, 1.75f, 3.75f, 5.75f, 7.75f };
+          // 掃描線、光暈、扇形、海岸線 / 距離環餘暉都在 sweep_fx.h 的單一物件裡畫;
+          // coastfx::step 只把這一幀掃過的楔形沿半徑切段失效(不再失效整個外接矩形)。
           if (!dark && sw) {
-            lv_obj_t *lines[5] = { id(sweep_line)->obj,
-                                   id(tail0)->obj, id(tail1)->obj, id(tail2)->obj, id(tail3)->obj };
-            // lv_line 的物件大小是「原點 (0,0) 到最遠的點」(lv_line.c GET_SELF_SIZE),
-            // 物件放在頁面原點時,每幀失效的是「頁面左上角到線尾」整塊——指向右下時
-            // 等於整個雷達重畫,平均約是線外接矩形的 4 倍。改成每幀把物件移到線的
-            // 外接矩形左上角、點用相對座標,失效範圍就只剩外接矩形(新舊位置各一)。
-            static lv_point_t lp[5][2];
-            const lv_coord_t cx = RS(240), cy = RS(240);
-            for (int k = 0; k < 5; k++) {
-              float a = (cur - TAIL_DEG[k]) * DEG;    // 第0條=掃描線,其後依序後退
-              lv_coord_t tx = cx + (lv_coord_t) ((float) RADAR_R * sinf(a));
-              lv_coord_t ty = cy - (lv_coord_t) ((float) RADAR_R * cosf(a));
-              // 線寬的一半往外留邊,點才不會是負座標(線頭會畫出物件框外被裁掉)
-              lv_coord_t m = lv_obj_get_style_line_width(lines[k], LV_PART_MAIN) / 2 + 1;
-              lv_coord_t ox = LV_MIN(cx, tx) - m, oy = LV_MIN(cy, ty) - m;
-              lp[k][0].x = cx - ox; lp[k][0].y = cy - oy;
-              lp[k][1].x = tx - ox; lp[k][1].y = ty - oy;
-              lv_obj_set_pos(lines[k], ox, oy);
-              lv_line_set_points(lines[k], lp[k], 2);
-            }
+            coastfx::step(prev, cur);
+          } else {
+            coastfx::g_sweep = (int16_t) ((int) (cur * 10.0f) % 3600);   // 暗著:只記角度,不重畫
+            sweepfx::g_ang = cur;
           }
-          // 航班點:被掃描線掃過→高亮,之後依時間漸暗(不受幀率影響)
-          if (id(slot_glow).size() != 10) return;
+          // 航班:被掃到 → 閃冷白,之後先快後慢地回原色(sweep_fx.h,約 5.5 秒)。
+          // 亮度量化成 20 階,階有變才 recolor:40 架每幀都 recolor 會超過 LVGL 的失效區上限而整屏重畫。
+          // (以前這裡檢查 slot_glow.size() != 10,航班上限改成 40 之後就一直提早 return,高亮從沒作用過)
           lv_obj_t *imgs[AC_SLOTS] = {
             (lv_obj_t *) id(ai0), (lv_obj_t *) id(ai1), (lv_obj_t *) id(ai2), (lv_obj_t *) id(ai3), (lv_obj_t *) id(ai4), (lv_obj_t *) id(ai5), (lv_obj_t *) id(ai6), (lv_obj_t *) id(ai7),
             (lv_obj_t *) id(ai8), (lv_obj_t *) id(ai9), (lv_obj_t *) id(ai10), (lv_obj_t *) id(ai11), (lv_obj_t *) id(ai12), (lv_obj_t *) id(ai13), (lv_obj_t *) id(ai14), (lv_obj_t *) id(ai15),
@@ -2329,28 +2346,23 @@ interval:
             (lv_obj_t *) id(ai24), (lv_obj_t *) id(ai25), (lv_obj_t *) id(ai26), (lv_obj_t *) id(ai27), (lv_obj_t *) id(ai28), (lv_obj_t *) id(ai29), (lv_obj_t *) id(ai30), (lv_obj_t *) id(ai31),
             (lv_obj_t *) id(ai32), (lv_obj_t *) id(ai33), (lv_obj_t *) id(ai34), (lv_obj_t *) id(ai35), (lv_obj_t *) id(ai36), (lv_obj_t *) id(ai37), (lv_obj_t *) id(ai38), (lv_obj_t *) id(ai39)
           };
-          const float DECAY = 0.932f;              // 每幀衰減(30ms,約 0.5s 半衰,同 20fps 時的 0.89)
+          if ((int) id(slot_angle).size() < AC_SLOTS) return;
           for (int i = 0; i < AC_SLOTS; i++) {
             float ang = id(slot_angle)[i];
-            if (ang < 0) continue;
+            if (ang < 0) { sweepfx::g_hit[i] = 0; continue; }
             bool crossed = false;
             if (!sw)              crossed = false;
             else if (cur >= prev) crossed = (ang > prev && ang <= cur);
             else                  crossed = (ang > prev || ang <= cur);   // 跨 360
-            float g0 = id(slot_glow)[i];
-            float g = crossed ? 1.0f : g0 * DECAY;
-            id(slot_glow)[i] = g;
-            // 已回到基底且上一幀也是基底 → 略過 recolor(省重繪)
-            if (g < 0.02f && g0 < 0.02f) continue;
-            if (dark) continue;   // 螢幕是暗的:輝度值照算,但不要 invalidate 圖示
+            if (crossed) sweepfx::g_hit[i] = now ? now : 1;
+            uint8_t lv = sweepfx::level(i, now);
+            if (lv == sweepfx::g_lvl[i]) continue;
+            sweepfx::g_lvl[i] = lv;
+            if (dark) continue;   // 螢幕是暗的:亮度照算,但不要 invalidate 圖示
             int idx = (i < (int) id(slot_map).size()) ? id(slot_map)[i] : -1;
             bool selg = (idx >= 0 && !id(sel_cs_g).empty() &&
                          idx < (int) id(ac_cs).size() && id(ac_cs)[idx] == id(sel_cs_g));
-            uint8_t br = selg ? 0xFF : 0x40, bg = selg ? 0xD2 : 0xFF, bb = selg ? 0x4A : 0x9A;
-            uint8_t r = br + (uint8_t)((255 - br) * g);
-            uint8_t gg = bg + (uint8_t)((255 - bg) * g);
-            uint8_t b = bb + (uint8_t)((255 - bb) * g);
-            lv_obj_set_style_img_recolor(imgs[i], lv_color_make(r, gg, b), 0);
+            lv_obj_set_style_img_recolor(imgs[i], sweepfx::color(selg, lv), 0);
           }
   # 回波每 10 分鐘更新(開啟時)
   - interval: 600s

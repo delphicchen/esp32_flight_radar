@@ -69,6 +69,10 @@ esp32:
       CONFIG_MBEDTLS_DYNAMIC_BUFFER: "y"          # TLS 緩衝握手時才配、用完即釋放(降峰值)
       CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN: "y"  # 收/發用不同大小,配合 dynamic buffer
       CONFIG_MBEDTLS_SSL_MAX_CONTENT_LEN: "8192"  # 預設 16384;減半再省一半 TLS 緩衝
+      # mbedTLS 的記憶體改從 PSRAM 配置:1024x600 的繪圖緩衝 + bounce buffer 比 800x480 多吃近 40KB
+      # 內部 RAM,v1.5.0 起畫面元件又多,握手時 alloc(4770) 失敗(-0x7F00),回波 / 航班抓不到
+      CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC: "n"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
       # 不要開 CONFIG_LCD_RGB_RESTART_IN_VSYNC:實測於本板無效——位移沒有消失,
       # 反而因為每個 VBlank 重置 GDMA 通道而造成畫面嚴重抖動。
       # 註:CONFIG_LCD_RGB_ISR_IRAM_SAFE 以前單獨開會 crash loop(Cache disabled but

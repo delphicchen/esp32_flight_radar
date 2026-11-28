@@ -9,6 +9,7 @@
 # =============================================================
 
 substitutions:
+  sweep_ms: 60ms        # 掃描線 60ms 更新一次(見 common/core.yaml;大螢幕 S3 的 PSRAM 頻寬不夠 30ms)
   disp_w: "1024"         # panel width  (px)
   disp_h: "600"          # panel height (px)
   radar_canvas: "570"    # radar canvas side (456 * 1.25) — matches ui/ui_1024x600.yaml

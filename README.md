@@ -45,7 +45,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 
 ### What it does
 
-- **Live flight radar** — up to 40 aircraft from adsb.lol, airplanes.live or OpenSky, with a rotating sweep.
+- **Live flight radar** — up to 40 aircraft from adsb.lol, airplanes.live or OpenSky. 🆕 The sweep
+  looks like a radar CRT: coastlines and range rings glow as it passes; one turn every 12 s (4.8 / 6 s selectable).
 - **Tap an aircraft** for route, squawk, altitude, speed and type; tap the type for a to-scale
   silhouette and specs from an offline database.
 - **ATC mode and flight strips** — velocity vectors, trails, conflict alert; tap **▲** in the
@@ -90,7 +91,8 @@ run can flash another board's stale image. Coming from v1.2.0 or older, flash on
 
 ### 它能做什麼
 
-- **即時航班雷達** —— 從 adsb.lol、airplanes.live 或 OpenSky 取得最多 40 架航班,附旋轉掃描線。
+- **即時航班雷達** —— 從 adsb.lol、airplanes.live 或 OpenSky 取得最多 40 架航班。🆕 掃描線仿雷達 CRT:
+  掃過時海岸線與距離環亮起再暗回去;預設 12 秒一圈(可改 4.8 / 6 秒)。
 - **點選航班**看起訖、squawk、高度、速度與機型;點機型看等比例輪廓與規格(離線資料庫)。
 - **ATC 模式與 flight strip** —— 速度向量、歷史軌跡、衝突警示;點右欄的 **▲** 打開依距離排序的 strip 列表,
   選中航班畫出完整航跡。
@@ -124,7 +126,8 @@ run can flash another board's stale image. Coming from v1.2.0 or older, flash on
 
 ### 它能做什么
 
-- **实时航班雷达** —— 从 adsb.lol、airplanes.live 或 OpenSky 获取最多 40 架航班,附旋转扫描线。
+- **实时航班雷达** —— 从 adsb.lol、airplanes.live 或 OpenSky 获取最多 40 架航班。🆕 扫描线仿雷达 CRT:
+  扫过时海岸线与距离环亮起再暗回去;默认 12 秒一圈(可改 4.8 / 6 秒)。
 - **点选航班**看起讫、squawk、高度、速度与机型;点机型看等比例轮廓与规格(离线数据库)。
 - **ATC 模式与 flight strip** —— 速度矢量、历史轨迹、冲突警示;点右栏的 **▲** 打开按距离排序的 strip 列表,
   选中航班画出完整航迹。

@@ -3,6 +3,37 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.5.1] — 2026-11-29
+
+**After updating, the map downloads once more in the background** (about a minute after Wi-Fi
+connects). The old map stays on screen until then. This picks up the corrected Taiwan tiles below.
+The P4 gets the same changes in v1.5.1-p4.
+
+### Added
+
+- **Radar sweep that looks like a CRT.** The beam is a bright green line with a soft halo and a
+  short fading wedge. **Coastlines and range rings light up as the sweep passes** and fade back;
+  aircraft flash and fade over almost a full turn. Country, state and county lines stay as they are.
+- **Sweep period:** one turn every **12 s** by default (en-route radar), or 4.8 s / 6 s. Button next
+  to RADAR SWEEP on the settings page; web UI *Sweep Period*.
+
+### Changed
+
+- Coastlines are 2 px wide.
+- Taiwan's county lines were marked as coastline in the map tiles; they are now county lines
+  (dimmer, and they do not light up). Map data revision 1 triggers the one-time re-download.
+- Much less redrawing: the sweep redraws only the strip it covers, aircraft vectors and the
+  selected track redraw only their own area, unchanged aircraft labels are not redrawn every second,
+  and the big clock redraws only the seconds. Touch-LCD-5B: 12–18 FPS with CPU maxed out → 20–33 FPS
+  at 33–60%.
+- Touch-LCD-5B / 7B step the sweep every 60 ms instead of 30 ms.
+
+### Fixed
+
+- **Touch-LCD-5B / 7B showed no rain echo** (and could miss flights): TLS ran out of internal RAM.
+  All boards now give the TLS library PSRAM instead.
+- The sweep's aircraft highlight had not worked since the aircraft limit went from 10 to 40.
+
 ## [v1.5.0] — 2026-11-28
 
 The P4 gets the same changes in v1.5.0-p4.

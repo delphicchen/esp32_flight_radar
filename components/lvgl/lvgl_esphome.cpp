@@ -241,10 +241,24 @@ void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_t *ptr) {
   }
 }
 
+#ifdef PERF_SLOW_LOG
+}  // namespace lvgl
+}  // namespace esphome
+#include "esp_timer.h"
+namespace esphome {
+namespace lvgl {
+uint32_t g_diag_flush_us = 0;   // DIAG:這一幀 flush 累計微秒(radar_fetch.h 的 perf 讀取後歸零)
+#endif
 void LvglComponent::flush_cb_(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p) {
   if (!this->is_paused()) {
     auto now = millis();
+#ifdef PERF_SLOW_LOG
+    int64_t t0 = esp_timer_get_time();
+#endif
     this->draw_buffer_(area, color_p);
+#ifdef PERF_SLOW_LOG
+    g_diag_flush_us += (uint32_t) (esp_timer_get_time() - t0);
+#endif
     ESP_LOGVV(TAG, "flush_cb, area=%d/%d, %d/%d took %dms", area->x1, area->y1, lv_area_get_width(area),
               lv_area_get_height(area), (int) (millis() - now));
   }

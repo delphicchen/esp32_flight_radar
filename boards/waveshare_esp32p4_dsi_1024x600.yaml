@@ -47,6 +47,10 @@ esp32:
   framework:
     type: esp-idf
     sdkconfig_options:
+      # mbedTLS 的記憶體改從 PSRAM 配置(全部板子一致):內部 RAM 留給繪圖緩衝與畫面元件,
+      # 1024x600 的 5B 曾因內部 RAM 不足讓 TLS 握手失敗(-0x7F00),回波 / 航班抓不到
+      CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC: "n"
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
       # 沒有這一行,malloc() 永遠只用內部 RAM(P4 約 768KB),PSRAM 完全碰不到。
       # 四塊 S3 板檔一直都有設,只有這裡漏了 —— 在地圖還是編譯進 flash 的年代
       # 看不出來(rodata 不佔 RAM),v1.3.0 把地圖改成執行期載入之後,圖磚的

@@ -40,8 +40,10 @@ Examples:
     # The county file is 9 MB, so it lives in the gitignored cache; fetch it with:
     #   curl -Lo tools/cache/twcounty2010.geojson \
     #     https://raw.githubusercontent.com/g0v/twgeojson/master/json/twCounty2010.geo.json
-    python make_tiles.py --out ../flight-radar-maps --cells N20E120,N20E110 \
-        --add-geojson tools/cache/twcounty2010.geojson \
+    # --states 要跟世界那次一致;縣市界要 :3,不然預設種類 0 會跟海岸線混在一起
+    # (海岸線餘暉只點亮種類 0,圖資版次見 map_tiles.h 的 MAPS_REV)
+    python make_tiles.py --out ../flight-radar-maps --cells N20E120,N20E110 --states \
+        --add-geojson tools/cache/twcounty2010.geojson:3 \
         --airspace-geojson tools/taiwan_airspace.geojson --min-airport small
 
     # US county lines as a dim layer under the state borders (Natural Earth

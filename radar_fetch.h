@@ -1258,6 +1258,13 @@ inline uint8_t atc_layer_mask(bool atc, bool asp, bool rwy, bool apt, bool fix) 
 // 點全在範圍外 —— 是範圍/圖磚密度的問題,不是繪製 bug。SYS 頁的 MAP 行會顯示。
 inline volatile int g_map_near = -1;
 
+// 海岸線段(畫布座標),給 sweep_fx.h 的 coastfx 做「被掃到時亮起、再慢慢暗回底色」。
+// 底圖裡的海岸線改用 COAST_FLOOR(餘暉的底色)畫,亮的部分由覆蓋層在上面補畫。
+// ang = 線段中點的方位角(0.1° 單位,北 = 0、順時針),依它排序,每幀二分搜尋。
+struct CoastSeg { int16_t x1, y1, x2, y2, bx1, by1, bx2, by2; uint16_t ang; };
+inline std::vector<CoastSeg> g_coast;
+static const uint32_t COAST_FLOOR = 0x7A7248;   // 原色 0xD8C878 的約 55%
+
 inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
                                bool map_show, bool echo_show, uint8_t atc_layers) {
   lv_img_dsc_t *img = lv_canvas_get_img(cv);
@@ -1293,6 +1300,7 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
     memcpy((void *) img->data, cache, BYTES);
   } else {
     if (!map_show) g_map_near = -1;   // MAP 關掉就別讓 SYS 頁顯示舊的點數
+    g_coast.clear();
     // 不要用 lv_canvas_fill_bg:它逐像素呼叫 set_px_color + set_px_alpha
     // (570x570 = 324,900 次 x2),每次都重算 offset 再走 lv_memcpy_small。
     // 1024x600 的 RGB 面板 GDMA 同時在吃 PSRAM 頻寬,兩者相撞會慢到每像素
@@ -1310,11 +1318,12 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
       static const uint32_t MAP_KIND_COLOR[4] = {0xD8C878, 0x9A8B54, 0x685E38, 0x494227};
       lv_draw_line_dsc_t dsc;
       lv_draw_line_dsc_init(&dsc);
-      dsc.color = lv_color_hex(MAP_KIND_COLOR[0]);   // 淡黃色輪廓線
-      dsc.width = 1;
+      dsc.color = lv_color_hex(COAST_FLOOR);   // 舊格式沒有分隔種類:當海岸線
+      dsc.width = 2;                           // 海岸線 2px(比較顯眼);其他邊界 1px
       dsc.opa = LV_OPA_COVER;
       float r2 = rng * rng;
       bool have_prev = false;
+      uint8_t cur_kind = 0;   // 舊格式沒有分隔種類:預設海岸線
       lv_point_t prev{0, 0};
       float pd2 = 1e18f;
       int near_pts = 0;
@@ -1324,7 +1333,9 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
           have_prev = false;
           uint8_t kind = isnan(lo) ? 0 : (uint8_t) lo;
           if (kind > 3) kind = 3;
-          dsc.color = lv_color_hex(MAP_KIND_COLOR[kind]);
+          cur_kind = kind;
+          dsc.color = lv_color_hex(kind == 0 ? COAST_FLOOR : MAP_KIND_COLOR[kind]);
+          dsc.width = kind == 0 ? 2 : 1;
           continue;
         }
         float e = (lo - lon0) * 111.320f * coslat;
@@ -1337,12 +1348,24 @@ inline void radar_rebuild_base(lv_obj_t *cv, float lat0, float lon0, float rng,
         if (have_prev && (d2 <= r2 || pd2 <= r2)) {
           lv_point_t seg[2] = {prev, p};
           lv_canvas_draw_line(cv, seg, 2, &dsc);
+          if (cur_kind == 0) {
+            float mx = (prev.x + p.x) * 0.5f - RADAR_CX, my = RADAR_CX - (prev.y + p.y) * 0.5f;
+            float deg = atan2f(mx, my) * 57.29578f;
+            if (deg < 0) deg += 360.0f;
+            CoastSeg c{(int16_t) prev.x, (int16_t) prev.y, (int16_t) p.x, (int16_t) p.y,
+                       (int16_t) (LV_MIN(prev.x, p.x) - 2), (int16_t) (LV_MIN(prev.y, p.y) - 2),
+                       (int16_t) (LV_MAX(prev.x, p.x) + 2), (int16_t) (LV_MAX(prev.y, p.y) + 2),
+                       (uint16_t) ((int) (deg * 10.0f) % 3600)};
+            g_coast.push_back(c);
+          }
         }
         prev = p;
         pd2 = d2;
         have_prev = true;
       }
       g_map_near = near_pts;
+      std::sort(g_coast.begin(), g_coast.end(),
+                [](const CoastSeg &a, const CoastSeg &b) { return a.ang < b.ang; });
     }
     if (cache) {
       memcpy(cache, img->data, BYTES);
@@ -2003,6 +2026,10 @@ inline void radar_fill_spec(lv_obj_t *img, lv_obj_t *l0, lv_obj_t *l1, lv_obj_t 
 // ---- SYS 面板的 FPS / CPU:同 LVGL perf monitor 的算法,但不在畫面角落另開標籤 ----
 // FPS = 最近這段時間「每幀渲染耗時」換算成每秒可畫幾幀(只算 >5000px 的幀),
 // 上限 = 刷新週期(30ms → 33);沒在重繪時顯示上限。CPU = 100 - LVGL 計時器閒置率。
+#ifdef PERF_SLOW_LOG
+namespace esphome { namespace lvgl { extern uint32_t g_diag_flush_us; } }
+namespace coastfx { extern uint32_t g_diag_fx_us; extern uint32_t g_diag_part[4]; }
+#endif
 namespace perf {
 inline uint32_t g_elaps = 0, g_frames = 0;
 inline void (*g_prev)(lv_disp_drv_t *, uint32_t, uint32_t) = nullptr;
@@ -2016,8 +2043,30 @@ inline void hook() {
   g_prev = d->driver->monitor_cb;
   d->driver->monitor_cb = [](lv_disp_drv_t *drv, uint32_t t, uint32_t px) {
     if (px > 5000) { g_elaps += t; g_frames++; }
+#ifdef PERF_SLOW_LOG
+    // DIAG(5B 每秒卡頓):繪製超過 60ms 的幀印出耗時與像素數,對照時間點找是哪個每秒更新
+    if (t > 60)
+      ESP_LOGW("perf", "slow frame %u ms, %u px, flush %u ms, fx %u ms (fan %u coast %u ring %u beam %u)",
+               (unsigned) t, (unsigned) px, (unsigned) (esphome::lvgl::g_diag_flush_us / 1000),
+               (unsigned) (coastfx::g_diag_fx_us / 1000), (unsigned) (coastfx::g_diag_part[0] / 1000),
+               (unsigned) (coastfx::g_diag_part[1] / 1000), (unsigned) (coastfx::g_diag_part[2] / 1000),
+               (unsigned) (coastfx::g_diag_part[3] / 1000));
+    esphome::lvgl::g_diag_flush_us = 0;
+    coastfx::g_diag_fx_us = 0;
+    for (auto &v : coastfx::g_diag_part) v = 0;
+#endif
     if (g_prev) g_prev(drv, t, px);
   };
+#ifdef PERF_SLOW_LOG
+  // DIAG:每個被標成要重畫、超過 1.5 萬像素的區域印出座標(rounder_cb 在每次失效時都會被呼叫)
+  static void (*prev_round)(lv_disp_drv_t *, lv_area_t *) = nullptr;
+  prev_round = d->driver->rounder_cb;
+  d->driver->rounder_cb = [](lv_disp_drv_t *drv, lv_area_t *a) {
+    if (prev_round) prev_round(drv, a);
+    uint32_t sz = lv_area_get_size(a);
+    if (sz > 15000) ESP_LOGW("perf", "inv %d,%d-%d,%d (%u px)", a->x1, a->y1, a->x2, a->y2, (unsigned) sz);
+  };
+#endif
 }
 // 取一次讀數並歸零(SYS 面板每秒呼叫)
 inline void read(uint32_t &fps, uint32_t &cpu) {

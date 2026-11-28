@@ -18,24 +18,7 @@ lvgl:
             y: 12
             width: 456
             height: 456
-        # 掃描尾巴(4 條漸暗,程式每幀更新座標,角度見 common/core.yaml 的 TAIL_DEG)
-        # 原本是 8 條、間隔 1°、線寬 5。每幀最貴的一項是 lv_draw_line:LVGL 是在
-        # 「線的外接矩形」上跑遮罩混色,45° 時那個矩形約 160x160,而九條線的矩形
-        # 幾乎完全重疊,等於同一片區域被反覆混色九次。條數減半 = 這項成本減半。
-        # 為了讓扇形不出現梳齒狀空隙,間距加倍(1°→2°)時線寬也要跟著加寬:
-        # 外緣 r=226 時 2° 的間距是 7.9px,線寬取 9 才能保住和原本一樣的 1.1px 重疊。
-        # 顏色取原本 8 段漸層的偶數項,漸層的起點、終點和斜率都不變。
-        - line: { id: tail0, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x007A3C, line_width: 9 }
-        - line: { id: tail1, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00592C, line_width: 9 }
-        - line: { id: tail2, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00391C, line_width: 9 }
-        - line: { id: tail3, opa: 60%, points: ["240, 240", "240, 20"], line_color: 0x00190C, line_width: 9 }
-        # 掃描線(100ms 轉動)
-        - line:
-            id: sweep_line
-            points: ["240, 240", "240, 14"]
-            line_color: 0x00A050
-            line_width: 2
-            opa: 80%
+        # 掃描線、光暈、扇形、海岸線 / 距離環餘暉:全部由 sweep_fx.h 在 C++ 建的一個物件畫(z 順序緊貼底圖之上)
         # #22 選中航班的完整航跡(進入畫面以來);程式每秒更新點陣列,壓在航班標記之下
         - line:
             id: sel_track
@@ -6258,7 +6241,7 @@ lvgl:
             id: sweep_btn
             x: 30
             y: 420
-            width: 278
+            width: 190
             height: 38
             radius: 4
             checkable: true
@@ -6279,6 +6262,29 @@ lvgl:
               - lambda: |-
                   id(sweep_on) = lv_obj_has_state((lv_obj_t *) id(sweep_btn), LV_STATE_CHECKED);
               - script.execute: sweep_apply
+        # 掃描線轉速:點一下依序 4.8 s(機場 ASR)→ 6 s → 12 s(航路 ARSR,預設);網頁 Sweep Period 同步
+        - button:
+            id: sweep_per_btn
+            x: 230
+            y: 420
+            width: 220
+            height: 38
+            radius: 4
+            bg_color: 0x040C08
+            border_width: 1
+            border_color: 0x00A050
+            widgets:
+              - label:
+                  id: sweep_per_l
+                  align: CENTER
+                  text: "12 s / TURN"
+                  text_font: font_small
+                  text_color: 0x00C060
+            on_click:
+              - lambda: |-
+                  auto call = id(sweep_per_sel).make_call();
+                  call.set_index((size_t) ((id(sweep_per) + 1) % 3));
+                  call.perform();
         # 顯示單位(下拉;公制/英制,影響溫度/速度/距離/高度/範圍顯示)
         # options 的 index 對齊 units_imperial:0=METRIC 1=IMPERIAL
         - label: { x: 30, y: 340, text: "UNIT", text_font: font_small, text_color: 0x9AE6B4 }

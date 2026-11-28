@@ -148,6 +148,18 @@ Press it again to go back; selecting another aircraft, opening **SYS** or losing
 - Units follow the **UNIT** setting: metres/tonnes/km-h or feet/pounds/mph.
 - To refresh or extend the database, edit the files in `tools/data/` — `aircraft_specs.csv` (dimensions), `engines.csv`, `common_types.txt` (which types to include), `silhouette_alias.csv` (borrow a look-alike's drawing), `silhouettes/<ICAO>.png` (a drawing of our own, written by `tools/make_local_silhouettes.py`) — then run `python3 tools/make_aircraft_db.py`.
 
+## Radar sweep
+
+The sweep imitates an old radar CRT: the beam is a bright green line with a soft halo and a
+short fading wedge behind it. As it passes, **coastlines and range rings light up** and fade
+back; aircraft flash and fade over almost a full turn. Country, state and county lines stay as
+they are, as on a real radar, which only sees land returns.
+
+- **One turn takes 12 seconds by default**, like an en-route surveillance radar (ARSR). Tap the
+  coordinates line, then the **12 s / TURN** button next to RADAR SWEEP to switch between
+  4.8 s (airport radar, ASR), 6 s and 12 s. Web UI: *Sweep Period*.
+- **RADAR SWEEP** turns the sweep off; aircraft and the map then stay at steady brightness.
+
 ## ATC mode
 
 Press the **ATC** button (in the top-right button row, between **ECHO** and **PWR**) to switch the radar from plane icons to an air-traffic-control style view; press again to instantly restore the default view.
@@ -384,6 +396,16 @@ S3 板子從 v1.5.0、P4 從 v1.5.0-p4 起提供。需要在網頁介面填 *HA 
 - 發動機只列**主系列**(`CFM56`、`PT6A`、`Trent 700`),不列到變體。
 - 單位跟隨 **UNIT** 設定:公尺/公噸/km-h 或英尺/磅/mph。
 - 要更新或擴充資料庫,編輯 `tools/data/` 底下的檔案——`aircraft_specs.csv`(尺寸)、`engines.csv`(發動機)、`common_types.txt`(收錄哪些機型)、`silhouette_alias.csv`(借用外型相近機型的圖)、`silhouettes/<ICAO>.png`(自繪的圖,由 `tools/make_local_silhouettes.py` 產生)——再執行 `python3 tools/make_aircraft_db.py`。
+
+## 雷達掃描線
+
+掃描線模仿老式雷達的 CRT 螢幕:亮綠色掃描線帶一圈柔和光暈,後面拖著一小片漸暗的扇形。掃過的地方
+**海岸線與距離環會亮起再慢慢暗回去**;飛機被掃到時閃一下,約一整圈內慢慢暗回原色。國界、省界、
+縣市界不會亮 —— 真實雷達看到的只有陸地回波。
+
+- **預設 12 秒轉一圈**,跟航路監視雷達(ARSR)一樣。點座標列進設定頁,按 RADAR SWEEP 旁邊的
+  **12 s / TURN** 可切換 4.8 秒(機場雷達 ASR)、6 秒、12 秒。網頁介面是 *Sweep Period*。
+- **RADAR SWEEP** 可關掉掃描線;關掉後飛機與地圖維持固定亮度。
 
 ## ATC 模式
 
