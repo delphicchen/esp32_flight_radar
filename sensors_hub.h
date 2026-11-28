@@ -781,10 +781,75 @@ inline std::string date_str(esphome::ESPTime t) {   // ESPTime::strftime 不是 
   return b;
 }
 
+// ---- 卡片區模式:SENSOR(感測器曲線)/ CTRL(HA 裝置控制,ctrl_hub.h,PLAN_CTRL.md)----
+// 兩顆互斥按鈕 + 卡片區左右滑動切換;格數共用 GRID。實際切換走 yaml 的 select(存 NVS、同步網頁)。
+inline bool g_ctrl = false;
+inline int g_ctl_n = 0;                                   // 已設定的控制卡片數(CTRL 的 AUTO 用)
+inline int g_ctl_shown = -1;                              // 目前排出的控制卡片數(-1 = 要重排)
+inline void (*g_on_mode)(bool ctrl) = nullptr;            // 按鈕/滑動 → yaml
+inline void (*g_ctrl_place)(int n, const lv_area_t *r) = nullptr;   // ctrl_hub 排自己的卡片;n=0 全藏
+inline lv_obj_t *g_mb[2] = {nullptr, nullptr};            // [0]=SENSOR [1]=CTRL
+inline uint32_t g_gesture_ms = 0;                         // 最近一次滑動(卡片按鈕忽略緊接著的點擊)
+
+inline void mode_style() {
+  for (int i = 0; i < 2; i++) {
+    if (!g_mb[i]) continue;
+    bool on = (i == 1) == g_ctrl;
+    lv_obj_set_style_bg_color(g_mb[i], lv_color_hex(on ? 0x00C060 : 0x040C08), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(g_mb[i], 0), lv_color_hex(on ? 0x04180C : 0x00C060), 0);
+  }
+}
+
 inline void clock_init(lv_obj_t *time_l, lv_obj_t *date_l, lv_obj_t *sep, const lv_font_t *f_clk,
                        const lv_font_t *f_xl) {
   g_time_l = time_l; g_date_l = date_l; g_sep = sep;
   g_f_clk = f_clk; g_f_xl = f_xl;
+  static const char *const TXT[2] = {"SENSOR", "CTRL"};
+  for (int i = 0; i < 2; i++) {
+    lv_obj_t *b = lv_btn_create(g_page);
+    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(0x00A050), 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_t *l = lv_label_create(b);
+    lv_obj_set_style_text_font(l, g_f_name, 0);
+    lv_label_set_text(l, TXT[i]);
+    lv_obj_center(l);
+    lv_obj_set_ext_click_area(b, S(4));
+    lv_obj_add_event_cb(b, [](lv_event_t *e) {
+      bool want = (bool) (intptr_t) lv_event_get_user_data(e);
+      if (want != g_ctrl && g_on_mode) g_on_mode(want);
+    }, LV_EVENT_CLICKED, (void *) (intptr_t) i);
+    g_mb[i] = b;
+  }
+  mode_style();
+  // 卡片區左右滑動:往左 → CTRL,往右 → SENSOR(只認卡片區,時鐘那一帶不算)
+  lv_obj_add_event_cb(g_page, [](lv_event_t *e) {
+    lv_indev_t *in = lv_indev_get_act();
+    if (!in) return;
+    lv_point_t p;
+    lv_indev_get_point(in, &p);
+    if (p.y < g_top) return;
+    lv_dir_t d = lv_indev_get_gesture_dir(in);
+    if (d != LV_DIR_LEFT && d != LV_DIR_RIGHT) return;
+    g_gesture_ms = millis();
+    bool want = (d == LV_DIR_LEFT);
+    if (want != g_ctrl && g_on_mode) g_on_mode(want);
+  }, LV_EVENT_GESTURE, nullptr);
+}
+
+// 切換卡片區模式(yaml 的 select 呼叫);另一組卡片馬上藏起來,下次 layout() 重排
+inline void set_mode(bool ctrl) {
+  g_ctrl = ctrl;
+  mode_style();
+  if (ctrl) {
+    for (int i = 0; i < SLOT_MAX; i++) if (g_card[i].box) lv_obj_add_flag(g_card[i].box, LV_OBJ_FLAG_HIDDEN);
+  } else if (g_ctrl_place) {
+    g_ctrl_place(0, nullptr);
+  }
+  g_shown = -1;
+  g_ctl_shown = -1;
 }
 
 inline void set_big(bool big) {
@@ -806,7 +871,14 @@ inline void set_big(bool big) {
     lv_obj_align(g_date_l, LV_ALIGN_TOP_RIGHT, -S(16), S(62));   // 右緣對齊 RADAR 鈕
     lv_obj_clear_flag(g_sep, LV_OBJ_FLAG_HIDDEN);
   }
+  // SENSOR / CTRL:一般模式在時間正下方(原本日期的位置);大時鐘時左上角是空的,移到按鈕列
+  for (int i = 0; i < 2; i++) {
+    if (!g_mb[i]) continue;
+    lv_obj_set_size(g_mb[i], S(84), big ? S(32) : S(28));
+    lv_obj_set_pos(g_mb[i], S(22) + i * S(92), big ? S(20) : S(84));
+  }
   g_shown = -1;   // 卡片區高度變了,下次 layout() 一定重排
+  g_ctl_shown = -1;
 }
 
 // 格數 → 欄列
@@ -820,10 +892,41 @@ inline void grid_of(int n, int &cols, int &rows) {
   }
 }
 
+// n 格的每格位置(SENSOR / CTRL 共用)
+inline void slot_rects(int n, lv_area_t *r) {
+  int cols, rows;
+  grid_of(n, cols, rows);
+  const lv_coord_t pad = S(8), top = g_top > 0 ? g_top : S(122);
+  const lv_coord_t gw = g_W - 2 * pad, gh = g_H - top - pad;
+  const lv_coord_t cw = (gw - (cols - 1) * pad) / cols;
+  const lv_coord_t ch = (gh - (rows - 1) * pad) / rows;
+  for (int i = 0; i < n; i++) {
+    r[i].x1 = pad + (i % cols) * (cw + pad);
+    r[i].y1 = top + (i / cols) * (ch + pad);
+    r[i].x2 = r[i].x1 + cw - 1;
+    r[i].y2 = r[i].y1 + ch - 1;
+  }
+}
+
+// CTRL 模式:格數 = GRID 指定,AUTO = 已設定的控制卡片數(至少 1)
+inline bool layout_ctrl(int mode) {
+  int n = (mode >= 1 && mode <= SLOT_MAX) ? mode : (g_ctl_n < 1 ? 1 : g_ctl_n);
+  if (n > SLOT_MAX) n = SLOT_MAX;
+  if (n == 5) n = 6;
+  if (g_big && n > 3) n = 3;
+  if (n == g_ctl_shown || !g_ctrl_place) return false;
+  lv_area_t r[SLOT_MAX];
+  slot_rects(n, r);
+  g_ctrl_place(n, r);
+  g_ctl_shown = n;
+  return true;
+}
+
 // mode:0=AUTO,其餘 = 指定格數(1/2/3/4/6);pin[i]:0=自動,1..KEY_N = 指定 key+1
 // 回傳 true = 版面有變(呼叫端接著 refresh)
 inline bool layout(int mode, const int *pin) {
   if (!g_built) return false;
+  if (g_ctrl) return layout_ctrl(mode);
   // 自動清單:登記過、且沒被任何一格手動指定的 key,依 enum 順序
   int autos[KEY_N], na = 0;
   for (int o = 0; o < KEY_N; o++) {
@@ -896,7 +999,7 @@ inline uint32_t color_of(int k, float v) {
 
 // 數值、標籤、曲線全部重畫(頁面顯示中才呼叫;不在畫面上時 LVGL 不會重繪)
 inline void refresh(bool imperial) {
-  if (!g_built) return;
+  if (!g_built || g_ctrl) return;   // CTRL 模式時感測卡片藏著
   imperial_now = imperial;
   char b[32];
   for (int i = 0; i < SLOT_MAX; i++) {
