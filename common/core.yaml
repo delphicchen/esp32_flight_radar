@@ -50,6 +50,7 @@ esphome:
     - alarm.h
     - track_hist.h         # #22 選中航班的完整航跡歷史
     - sensors_hub.h        # #24 時鐘/感測器頁:數值登記 + 24h 曲線 + 卡片排版
+    - ctrl_hub.h           # 時鐘頁 CTRL 模式:HA 裝置控制卡片(PLAN_CTRL.md)
     - sensors_i2c.h        # #24 I2C 本地感測器自動偵測(匯流排 id: sens_i2c,見各板檔)
   on_boot:
     priority: -100
@@ -104,6 +105,44 @@ esphome:
                              lv_obj_get_style_text_font(id(cp_xlfont_l), LV_PART_MAIN));
             shub::set_big(id(shub_big));
             id(shub_big_sw).publish_state(id(shub_big));
+            // 卡片區 SENSOR / CTRL:按鈕或滑動 → 走 select 的 set_action(寫 NVS、同步網頁、重排)
+            ctrl::build(lv_obj_get_style_text_font(id(cp_valfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_midfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(cp_tinyfont_l), LV_PART_MAIN),
+                        lv_obj_get_style_text_font(id(wifi_icon), LV_PART_MAIN));
+            ctrl::g_ha_ok = !id(ha_token).state.empty();
+            // 選單挑好(或移除)→ 寫網頁的 Control N(存 NVS);on_value 再交回 ctrl::set_ent
+            ctrl::g_on_pick = [](int slot, const std::string &eid) {
+              text::Text *T[6] = { id(ctl_ent0), id(ctl_ent1), id(ctl_ent2), id(ctl_ent3), id(ctl_ent4), id(ctl_ent5) };
+              if (slot < 0 || slot >= 6) return;
+              auto call = T[slot]->make_call();
+              call.set_value(eid);
+              call.perform();
+            };
+            ctrl::g_on_list_req = []() {
+              std::string url = id(ha_url).state;
+              if (url.empty()) url = "http://homeassistant.local:8123";
+              radar_bg::request_ctl_list(url, id(ha_token).state);
+            };
+            ctrl::g_on_poll = []() { id(ctl_poll).execute(); };
+            // 操作:排進背景 task(插隊);佇列滿回 false,ctrl::tick() 下一輪重送
+            ctrl::g_send = [](int src, const std::string &path, const std::string &body) -> bool {
+              if (id(ha_token).state.empty() || !wifi::global_wifi_component->is_connected()) return false;
+              std::string url = id(ha_url).state;
+              if (url.empty()) url = "http://homeassistant.local:8123";
+              return radar_bg::request_ctl_call(url, id(ha_token).state, path, body, src);
+            };
+            {
+              text::Text *T[6] = { id(ctl_ent0), id(ctl_ent1), id(ctl_ent2), id(ctl_ent3), id(ctl_ent4), id(ctl_ent5) };
+              for (int i = 0; i < 6; i++) ctrl::set_ent(i, T[i]->state);
+            }
+            shub::g_on_mode = [](bool c) {
+              auto call = id(shub_ctrl_sel).make_call();
+              call.set_index(c ? 1 : 0);
+              call.perform();
+            };
+            shub::set_mode(id(shub_ctrl));
+            id(shub_ctrl_sel)->publish_state((size_t) (id(shub_ctrl) ? 1 : 0));
             // 卡片齒輪選單選定 → 走該格 select 的 set_action(寫 NVS、同步網頁、重排)
             shub::g_on_pick = [](int slot, int val) {
               select::Select *SS[6] = { id(shub_slot0_sel), id(shub_slot1_sel), id(shub_slot2_sel),
@@ -414,6 +453,66 @@ text:
           if (r.hist) for (int i = 0; i < shub::HIST_N; i++) r.hist[i] = NAN; r.count = 0;
       - script.execute: shub_ha_poll
   - platform: template
+    name: Control 1               # 時鐘頁 CTRL 第 1 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent0
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(0, x);'
+      - script.execute: ctl_poll
+  - platform: template
+    name: Control 2               # 時鐘頁 CTRL 第 2 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent1
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(1, x);'
+      - script.execute: ctl_poll
+  - platform: template
+    name: Control 3               # 時鐘頁 CTRL 第 3 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent2
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(2, x);'
+      - script.execute: ctl_poll
+  - platform: template
+    name: Control 4               # 時鐘頁 CTRL 第 4 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent3
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(3, x);'
+      - script.execute: ctl_poll
+  - platform: template
+    name: Control 5               # 時鐘頁 CTRL 第 5 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent4
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(4, x);'
+      - script.execute: ctl_poll
+  - platform: template
+    name: Control 6               # 時鐘頁 CTRL 第 6 格的 entity_id(light/cover/climate/fan;也可在卡片上挑)
+    id: ctl_ent5
+    mode: text
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: 'ctrl::set_ent(5, x);'
+      - script.execute: ctl_poll
+  - platform: template
     name: HA Token              # HA 長期存取權杖(個人資料頁→安全性),供喇叭掃描用
     id: ha_token
     mode: password
@@ -589,6 +688,20 @@ select:
           lv_dropdown_set_selected(id(tz_dd)->obj, id(tz_sel));
           id(tz_select).publish_state(*i);
 
+  # 時鐘頁卡片區:SENSOR(感測器曲線)/ CTRL(HA 裝置控制);畫面上的按鈕與左右滑動也走這裡
+  - platform: template
+    name: Clock Cards
+    id: shub_ctrl_sel
+    entity_category: config
+    options: ["SENSOR", "CTRL"]
+    set_action:
+      - lambda: |-
+          auto i = id(shub_ctrl_sel).index_of(x);
+          if (!i.has_value()) return;
+          id(shub_ctrl) = (*i == 1);
+          shub::set_mode(id(shub_ctrl));
+          id(shub_ctrl_sel).publish_state(x);
+          id(shub_refresh).execute();
   # #24 時鐘頁:格數與各格內容(預設 AUTO;手動指定的格沒資料時顯示 --)
   - platform: template
     name: Sensor Grid
@@ -764,6 +877,7 @@ globals:
   # #24 時鐘/感測器頁:格數 0=AUTO 或 1/2/3/4/6;各格指定 0=自動、1..10 = shub::Key+1
   - { id: shub_mode, type: int, restore_value: true, initial_value: '0' }
   - { id: shub_big, type: bool, restore_value: true, initial_value: 'false' }   # 時鐘頁大時鐘模式
+  - { id: shub_ctrl, type: bool, restore_value: true, initial_value: 'false' }  # 時鐘頁卡片區:false=SENSOR true=CTRL
   - { id: shub_pin, type: 'std::vector<int>' }   # 開機時由下面 6 個 NVS 值組成
   - { id: shub_p0, type: int, restore_value: true, initial_value: '0' }
   - { id: shub_p1, type: int, restore_value: true, initial_value: '0' }
@@ -1086,6 +1200,19 @@ script:
           std::string url = id(ha_url).state;
           if (url.empty()) url = "http://homeassistant.local:8123";
           radar_bg::request_ha_vals(url, id(ha_token).state, ids);
+
+  - id: ctl_poll               # 時鐘頁 CTRL:讀選定實體的狀態(只在 CTRL 顯示中;背景請求)
+    mode: single
+    then:
+      - lambda: |-
+          ctrl::g_ha_ok = !id(ha_token).state.empty();
+          if (!ctrl::g_ha_ok || !shub::g_ctrl || !wifi::global_wifi_component->is_connected()) return;
+          if (lv_scr_act() != id(clock_page)->obj) return;
+          std::string ids = ctrl::ids_csv();
+          if (ids.empty()) return;
+          std::string url = id(ha_url).state;
+          if (url.empty()) url = "http://homeassistant.local:8123";
+          radar_bg::request_ctl_states(url, id(ha_token).state, ids);
 
   - id: shub_refresh           # #24 時鐘頁:重排 + 刷新(頁面不在畫面上就跳過)
     mode: single
@@ -1452,6 +1579,15 @@ sensor:
     lambda: 'return isens::value(shub::CO2);'
 
 text_sensor:
+  # 時鐘頁 CTRL 診斷:HA 回報的原始屬性 / 最後一次服務呼叫(使用者回報問題時看這兩個)
+  - platform: template
+    name: Control States
+    id: ctl_raw_ts
+    entity_category: diagnostic
+  - platform: template
+    name: Control Last Call
+    id: ctl_call_ts
+    entity_category: diagnostic
   - platform: template
     name: I2C Sensors
     update_interval: 60s
@@ -1646,6 +1782,32 @@ interval:
                 if (end && end != h.state.c_str() && *end == 0) shub::set((shub::Key) (shub::HA1 + k), v);
               }
             }
+          }
+          // 時鐘頁 CTRL:控制實體清單(挑選中)與狀態
+          if (radar_bg::g_ctl_list_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ctl_list_ready = false;
+            std::string raw = radar_bg::g_ctl_list;
+            int st4 = radar_bg::g_ctl_list_status;
+            xSemaphoreGive(radar_bg::mtx());
+            ctrl::show_list(raw, st4);
+          }
+          if (radar_bg::g_ctl_states_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ctl_states_ready = false;
+            std::string raw = radar_bg::g_ctl_states;
+            xSemaphoreGive(radar_bg::mtx());
+            ctrl::apply(raw);
+            if (id(ctl_raw_ts).state != raw) id(ctl_raw_ts).publish_state(raw);
+          }
+          if (radar_bg::g_ctl_calls_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ctl_calls_ready = false;
+            auto calls = std::move(radar_bg::g_ctl_calls);
+            radar_bg::g_ctl_calls.clear();
+            xSemaphoreGive(radar_bg::mtx());
+            for (auto &c : calls) ctrl::call_done(c.first, c.second);
+            if (!calls.empty()) id(ctl_call_ts).publish_state(ctrl::g_call_dbg);
           }
           // 喇叭掃描結果 → 填入鬧鐘頁 5 個下拉選單(1-4 專屬 + DEF 預設)
           if (radar_bg::g_speakers_ready) {
@@ -2181,8 +2343,10 @@ interval:
           then:
             - script.execute: echo_refresh
   # #24 I2C 本地感測器:開機 3 秒後探測一次,之後每 100ms 讓到時間的裝置走一步
+  # 時鐘頁 CTRL:送到期的操作、逾時還原、操作後回讀狀態
   - interval: 100ms
     then:
+      - lambda: 'ctrl::tick();'
       - lambda: |-
           if (!isens::g_probed) {
             if (millis() > 3000) isens::probe(id(sens_i2c));
@@ -2197,10 +2361,11 @@ interval:
   - interval: 15s
     then:
       - script.execute: shub_ha_poll
-  # #24 時鐘頁顯示中:每 5 秒重排(AUTO 格數會隨數值增減)+ 刷新數值與曲線
+  # #24 時鐘頁顯示中:每 5 秒重排(AUTO 格數會隨數值增減)+ 刷新數值與曲線;CTRL 模式讀裝置狀態
   - interval: 5s
     then:
       - script.execute: shub_refresh
+      - script.execute: ctl_poll
   # 每 5 秒刷新 WiFi 狀態與座標顯示(只重繪那兩行)
   - interval: 5s
     then:

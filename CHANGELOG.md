@@ -3,6 +3,20 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.5.0] — 2026-11-28
+
+Prebuilt image for the P4 (`v1.5.0-p4`). The S3 boards get the same features as v1.5.0.
+
+### Added
+
+- **Home Assistant control on the clock page.** **SENSOR / CTRL** under the time (or a left/right
+  swipe on the cards) switches the cards to control lights, covers, climate and fans: tap to
+  toggle; sliders for brightness, position, target temperature and fan speed (0 = off); cover
+  OPEN / STOP / CLOSE; climate mode buttons; ⚙ for light color temperature and modes, all climate
+  modes and fan oscillation. Devices are picked on screen or as *Control 1–6* in the web UI.
+- Changes show at once and are confirmed from Home Assistant; failures roll back with the error shown.
+- Web UI diagnostics: *Control States* and *Control Last Call*.
+
 ## [v1.4.4] — 2026-11-28
 
 Prebuilt image for the P4 (`v1.4.4-p4`). The S3 boards get the same features as v1.4.1.
