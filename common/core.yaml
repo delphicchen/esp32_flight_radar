@@ -102,6 +102,13 @@ esphome:
               radar_bg::request_ctl_list(url, id(ha_token).state);
             };
             ctrl::g_on_poll = []() { id(ctl_poll).execute(); };
+            // 操作:排進背景 task(插隊);佇列滿回 false,ctrl::tick() 下一輪重送
+            ctrl::g_send = [](int src, const std::string &path, const std::string &body) -> bool {
+              if (id(ha_token).state.empty() || !wifi::global_wifi_component->is_connected()) return false;
+              std::string url = id(ha_url).state;
+              if (url.empty()) url = "http://homeassistant.local:8123";
+              return radar_bg::request_ctl_call(url, id(ha_token).state, path, body, src);
+            };
             {
               text::Text *T[6] = { id(ctl_ent0), id(ctl_ent1), id(ctl_ent2), id(ctl_ent3), id(ctl_ent4), id(ctl_ent5) };
               for (int i = 0; i < 6; i++) ctrl::set_ent(i, T[i]->state);
@@ -1573,6 +1580,15 @@ sensor:
     lambda: 'return isens::value(shub::CO2);'
 
 text_sensor:
+  # 時鐘頁 CTRL 診斷:HA 回報的原始屬性 / 最後一次服務呼叫(使用者回報問題時看這兩個)
+  - platform: template
+    name: Control States
+    id: ctl_raw_ts
+    entity_category: diagnostic
+  - platform: template
+    name: Control Last Call
+    id: ctl_call_ts
+    entity_category: diagnostic
   - platform: template
     name: I2C Sensors
     update_interval: 60s
@@ -1803,6 +1819,16 @@ interval:
             std::string raw = radar_bg::g_ctl_states;
             xSemaphoreGive(radar_bg::mtx());
             ctrl::apply(raw);
+            if (id(ctl_raw_ts).state != raw) id(ctl_raw_ts).publish_state(raw);
+          }
+          if (radar_bg::g_ctl_calls_ready) {
+            xSemaphoreTake(radar_bg::mtx(), portMAX_DELAY);
+            radar_bg::g_ctl_calls_ready = false;
+            auto calls = std::move(radar_bg::g_ctl_calls);
+            radar_bg::g_ctl_calls.clear();
+            xSemaphoreGive(radar_bg::mtx());
+            for (auto &c : calls) ctrl::call_done(c.first, c.second);
+            if (!calls.empty()) id(ctl_call_ts).publish_state(ctrl::g_call_dbg);
           }
           // 喇叭掃描結果 → 填入鬧鐘頁 5 個下拉選單(1-4 專屬 + DEF 預設)
           if (radar_bg::g_speakers_ready) {
@@ -2337,8 +2363,10 @@ interval:
           then:
             - script.execute: echo_refresh
   # #24 I2C 本地感測器:開機 3 秒後探測一次,之後每 100ms 讓到時間的裝置走一步
+  # 時鐘頁 CTRL:送到期的操作、逾時還原、操作後回讀狀態
   - interval: 100ms
     then:
+      - lambda: 'ctrl::tick();'
       - lambda: |-
           if (!isens::g_probed) {
             if (millis() > 3000) isens::probe(id(sens_i2c));

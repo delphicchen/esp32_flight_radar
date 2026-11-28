@@ -1,21 +1,23 @@
 # ✈️ ESP32 Flight Radar
 
-A desktop flight-radar ornament built entirely with **ESPHome**. Live aircraft over your
-location on an ATC-style scope — plus weather radar, a Home Assistant panel and an alarm clock.
+A desktop flight radar built entirely with **ESPHome**: live aircraft over your home on an
+ATC-style scope, plus weather radar, a clock with sensor curves, Home Assistant controls and an alarm.
 
-以 **ESPHome** 打造的桌面航班雷達擺件。航管雷達風格顯示你上空的即時航班,兼具氣象雷達、
-Home Assistant 面板與鬧鐘。
+以 **ESPHome** 打造的桌面航班雷達:航管風格顯示你上空的即時航班,兼具氣象雷達、感測器時鐘、
+Home Assistant 控制面板與鬧鐘。
 
-以 **ESPHome** 打造的桌面航班雷达摆件。航管雷达风格显示你上空的实时航班,兼具气象雷达、
-Home Assistant 面板与闹钟。
+以 **ESPHome** 打造的桌面航班雷达:航管风格显示你上空的实时航班,兼具气象雷达、传感器时钟、
+Home Assistant 控制面板与闹钟。
 
 **[English](#english) · [繁體中文](#繁體中文) · [简体中文](#简体中文)**
 
 ![ESP32 Flight Radar — radar sweep, ATC mode and the alarm page](docs/ATC_clock.gif)
 
-▶ **[Demo video / 示範影片 / 示范影片](docs/demo.mp4)**
+| Sensor page / 感測器頁 | 🆕 Home Assistant control / 裝置控制 | 🆕 Large clock / 大時鐘 |
+|---|---|---|
+| ![Clock page with sensor curves](docs/sensor_page.webp) | ![Clock page controlling a light, curtain, AC and fan](docs/ctrl_page.webp) | ![Large clock with three control cards](docs/large_clock.webp) |
 
-Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar).
+▶ **[Demo video / 示範影片 / 示范影片](docs/demo.mp4)** · Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
 ---
 
@@ -24,44 +26,16 @@ Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-r
 | Entry | Board | Panel | Branch |
 |-------|-------|-------|--------|
 | `radar.yaml` | generic ESP32-S3 5" (esp32-s3-5inch-rgb-001) | 800×480 RGB | `main` |
-| `radar-jc8048w550.yaml` | Guition JC8048W550**C** = Sunton ESP32-8048S050 *(alpha-test)* | 800×480 RGB | `main` |
+| `radar-jc8048w550.yaml` | Guition JC8048W550**C** = Sunton ESP32-8048S050 | 800×480 RGB | `main` |
 | `radar-panda-touch.yaml` | BIGTREETECH Panda Touch | 800×480 RGB | `main` |
 | `radar-s3-5.yaml` | Waveshare ESP32-S3-Touch-LCD-5 | 800×480 RGB | `main` |
 | `radar-s3-5b.yaml` | Waveshare ESP32-S3-Touch-LCD-5B | 1024×600 RGB | `main` |
-| `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 *(beta)* | 800×480 RGB | `main` |
-| `radar-s3-7b.yaml` | Waveshare ESP32-S3-Touch-LCD-7B *(beta)* | 1024×600 RGB | `main` |
+| `radar-s3-7.yaml` | Waveshare ESP32-S3-Touch-LCD-7 | 800×480 RGB | `main` |
+| `radar-s3-7b.yaml` | Waveshare ESP32-S3-Touch-LCD-7B | 1024×600 RGB | `main` |
 | `radar-p4-7b.yaml` | Waveshare ESP32-P4-WIFI6-Touch-LCD-7B | 1024×600 MIPI-DSI | `lvgl9` |
 
 All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash**.
-
-> **Testers wanted — Touch-LCD-7 / 7B (beta).** Built and config-verified but not yet flashed on
-> real hardware. Pick it on the installer page and report back on
-> [#17](https://github.com/delphicchen/esp32_flight_radar/issues/17).
-> 徵求測試:7 吋 / 7B 板已編譯驗證、尚未實機燒錄,歡迎回報 / 征求测试,欢迎回报。
-
-> **The map is downloaded now, and that needs one USB flash.** The firmware used to
-> compile the map in, so a prebuilt image only had a useful map near Taiwan; it now
-> fetches tiles for your own coordinates, which required a custom partition table — and
-> **a partition table cannot be changed over OTA**. Coming from v1.2.0 or earlier, flash
-> once over USB; OTA works normally again afterwards. To stay on the old behaviour, use
-> the **[`pre-maptiles`](https://github.com/delphicchen/esp32_flight_radar/releases/tag/pre-maptiles)**
-> tag (`git checkout pre-maptiles`) — that is the last commit with the baked-in map and
-> the stock partition table.
->
-> **地圖改成下載,升級需要接 USB 燒一次。** 以前地圖是編譯進韌體的,預編版只有台灣能用;
-> 現在改成依你的座標抓圖磚,為此換了分割表,而**分割表無法用 OTA 更新**。從 v1.2.0 以前
-> 升上來要接線燒一次,之後照樣能 OTA。想留在舊行為請用 `git checkout pre-maptiles`。
-
-> **Two branches, not old and new.** `main` runs the ESP32-S3 boards on ESPHome 2026.3.3 /
-> LVGL 8. `lvgl9` runs the ESP32-P4 on 2026.6.5 / LVGL 9.5. The P4 has no choice — its
-> microSD support needs a component that will not load on the older ESPHome. The S3 boards
-> stay on LVGL 8 because LVGL 9 measurably slowed their radar sweep down. Both are maintained.
->
-> **兩個分支不是新舊關係,是各自服務不同板子** —— P4 沒得選(microSD 需要新版才載得起來的
-> 元件),S3 留在 LVGL 8 是因為實測 LVGL 9 會讓掃描線變慢。兩邊都持續維護。
->
-> **两个分支不是新旧关系,是各自服务不同板子** —— P4 没得选(microSD 需要新版才载得起来的
-> 组件),S3 留在 LVGL 8 是因为实测 LVGL 9 会让扫描线变慢。两边都持续维护。
+`main` (S3, ESPHome 2026.3 / LVGL 8) and `lvgl9` (P4, ESPHome 2026.6 / LVGL 9) are both maintained.
 
 ---
 
@@ -69,94 +43,44 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 
 ### What it does
 
-- **Live flight radar** — up to 40 aircraft from [OpenSky](https://opensky-network.org/),
-  [airplanes.live](https://airplanes.live/) or [adsb.lol](https://adsb.lol/), with a rotating
-  sweep and a glow as the beam passes each target. Switch source on screen; OpenSky failures
-  fall back to the free APIs automatically.
-- **Tap any aircraft** for origin → destination, squawk (red on 7500/7600/7700), altitude,
-  speed, heading, vertical rate, distance and ICAO type.
-- **Tap the type badge** for the airframe itself: a bright-yellow top-down silhouette drawn
-  to scale by real wingspan, revealed under a scan line, plus manufacturer, model, wingspan,
-  length, MTOW, cruise speed, registration, country of registry, engine series and operator.
-  318 type designators, 107 drawings and 6004 operators, all compiled into the firmware —
-  no lookup, no network, works offline (on the OpenSky source the type code itself is
-  fetched once per selected aircraft, since OpenSky does not report it).
-- **ATC mode** — target squares, 2-minute velocity vectors, fading history trails and a local
-  conflict alert.
-- **Weather echo** — rain radar from [RainViewer](https://www.rainviewer.com/), decoded on a
-  background core so the UI never stutters.
-- **Map outline** — coastlines, borders, airports, runways, navaids and airspace.
-- **Alarm clock** — 4 alarms with per-weekday scheduling, ringing through a Home Assistant
-  speaker or the board's own (P4).
-- **Clock & sensor page — tap the clock** (v1.4.0; P4 v1.4.3-p4). A full-screen clock with the date
-  on top, and below it up to 6 sensor cards, each with its value, MAX/MIN and a curve of the last
-  24 hours. Tap the time for a large clock (S3 v1.4.1, P4 v1.4.4-p4). Values come from local weather (outdoor
-  temperature/humidity, plus sea-level pressure from S3 v1.4.1 / P4 v1.4.4-p4), I²C sensors found
-  automatically at boot (AHT20, SHT3x/SHT4x, BME280/BMP280, SCD40/41 CO2), and any numeric
-  Home Assistant sensor you pick from an on-screen list sorted by category. The number of cards
-  is automatic, or set it with **GRID**. Tap a card's ⚙ to choose what it shows or to set
-  high/low thresholds with their own colors. **ALARM** opens the alarm page and **PWR** turns
-  the screen off. Details: [Usage guide](docs/USAGE.md#clock--sensor-page).
-
-  ![Clock and sensor page with Home Assistant CO2 and outdoor temperature/humidity cards](docs/clock_page.png)
-- **Alarms and timezone: clock page → ALARM**. The clock defaults to Taipei time; pick
-  yours under **TIMEZONE** on that page (also in the web UI as *Timezone*), or choose
-  **AUTO (BY LOCATION)** to follow your coordinates, daylight saving included.
-- **Sweep on or off** — tap the coordinates line and toggle **RADAR SWEEP** (web UI:
-  *Radar Sweep*) to stop the rotating sweep; aircraft stay on screen at steady brightness.
-- **Flight strip list — tap the ▲ arrow** in the middle of the right panel (on the line
-  under the MAP/ECHO/ATC buttons). The controls fold away, the clock shrinks to the top-left,
-  and the whole right column shows ATC-style flight strips sorted by distance: callsign, type,
-  flight level, climb/descent, ground speed and distance, 6 per page (◀ ▶ to page). Tap a strip
-  to select that aircraft, or tap an aircraft on the radar to find its strip. The selected strip
-  is outlined and the aircraft draws its full track since it entered the screen in white (lost
-  on reboot; one point per poll). Tap **▼** to bring the controls back; the mode survives a reboot.
-
-  ![Flight strip list with a selected aircraft and its track](docs/flight_strips.png)
-- **Home Assistant** — auto-discovers; backlight, Wi-Fi signal and buttons become entities.
-- **Screenshots** — three-finger swipe saves a BMP, downloadable over HTTP and, on the P4,
-  written to microSD.
-- **Set up entirely on the touch screen** — Wi-Fi via captive portal, everything else on the
-  panel. Stored in NVS, survives reboots. **OTA after the first flash.**
+- **Live flight radar** — up to 40 aircraft from adsb.lol, airplanes.live or OpenSky, with a rotating sweep.
+- **Tap an aircraft** for route, squawk, altitude, speed and type; tap the type for a to-scale
+  silhouette and specs from an offline database.
+- **ATC mode and flight strips** — velocity vectors, trails, conflict alert, and a strip list
+  sorted by distance that draws the selected flight's full track.
+- **Weather and map** — RainViewer rain echo; coastlines, airports, runways and airspace for your own location.
+- **Clock page** (tap the clock) — up to 6 sensor cards with 24-hour curves: local weather,
+  I²C sensors detected at boot (AHT20, SHT3x/4x, BME280, SCD4x) or any Home Assistant sensor.
+  🆕 Tap the time for a large clock.
+- 🆕 **Home Assistant control** — switch the cards to **CTRL** (button or swipe) to run lights
+  (brightness, color temperature, modes), curtains, air conditioners and fans with sliders and buttons.
+- **Alarm clock** — 4 alarms, rung through a Home Assistant speaker (or the P4's own).
+- **Set up on the touch screen**, auto-discovered by Home Assistant, **OTA** after the first flash.
 
 ### Install
 
-**Easiest — flash from your browser** (Chrome or Edge, no toolchain):
-**[open the installer page](https://delphicchen.github.io/esp32_flight_radar/install.html)**
+**[Flash from your browser](https://delphicchen.github.io/esp32_flight_radar/install.html)**
+(Chrome or Edge). The first flash is over USB; if it stalls, hold **BOOT**, tap **RESET**, release **BOOT**.
 
-**From source:**
+From source:
 
 ```bash
-git clone https://github.com/delphicchen/esp32_flight_radar
-cd esp32_flight_radar
-# S3 boards -> main branch:
-pip install 'esphome==2026.3.*'
-tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 1st flash: USB
-tools/dev_flash.sh radar.yaml                         # afterwards: Wi-Fi OTA
-# P4 board -> lvgl9 branch:
-git checkout lvgl9 && pip install 'esphome==2026.6.*'
-tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
+git clone https://github.com/delphicchen/esp32_flight_radar && cd esp32_flight_radar
+pip install 'esphome==2026.3.*'                          # P4: git checkout lvgl9, esphome==2026.6.*
+tools/dev_flash.sh radar.yaml --device /dev/ttyACM0      # first flash over USB, then without --device
 ```
 
-Always flash through `tools/dev_flash.sh`, never a bare `esphome run`: every entry shares one ESPHome device name (`flight-radar`), so a bare run can silently pick up another board's stale image from the shared build dir (this really happened — right backlight, black screen).
-
-First flash must be over **USB**. If it stalls: hold **BOOT**, tap **RESET**, release **BOOT**.
+Use `tools/dev_flash.sh`, not a bare `esphome run`: all entries share one device name, and a bare
+run can flash another board's stale image. Coming from v1.2.0 or older, flash once over USB
+(the partition table changed).
 
 ### First run
 
-1. Connect to the **`Radar-Setup`** hotspot (password `12345678`) and pick your Wi-Fi.
-2. Tap the coordinates line to set your latitude, longitude and scan range.
-3. Aircraft appear within a minute. **MAP** and **ECHO** start on; toggle them as you like.
+1. Join the **`Radar-Setup`** hotspot (password `12345678`) and pick your Wi-Fi.
+2. Tap the coordinates line to set your latitude, longitude and range. Aircraft appear within a minute.
+3. For Home Assistant sensors, controls or alarm speakers, enter *HA URL* and *HA Token* in the device's web UI.
 
-No account or API key is needed unless you specifically choose the OpenSky source.
-
-### More
-
-- **[Usage guide](docs/USAGE.md)** — alarms, ATC mode, screenshots to Home Assistant, using it
-  outside Taiwan
-- **[Boards & internals](docs/BOARDS.md)** — per-board pins and timings, local component
-  overrides, how to add a board
-- **[Changelog](CHANGELOG.md)** — what changed per release, and what an upgrade costs you
+**More:** [Usage guide](docs/USAGE.md) · [Boards & internals](docs/BOARDS.md) · [Changelog](CHANGELOG.md)
 
 ---
 
@@ -164,81 +88,32 @@ No account or API key is needed unless you specifically choose the OpenSky sourc
 
 ### 它能做什麼
 
-- **即時航班雷達** —— 從 [OpenSky](https://opensky-network.org/)、
-  [airplanes.live](https://airplanes.live/) 或 [adsb.lol](https://adsb.lol/) 取得最多 40 架
-  航班,掃描線轉到時目標會亮起。資料來源可在螢幕上切換,OpenSky 失敗會自動退回免金鑰的來源。
-- **點選任一航班** 顯示起訖機場、squawk(7500/7600/7700 轉紅)、高度、速度、航向、
-  升降率、距離與 ICAO 機型代碼。
-- **點機型徽章** 看這台飛機本身:亮黃色俯視輪廓(依真實翼展等比縮放、以掃描線方式現形),
-  加上製造商、機型全名、翼展、機身長度、最大起飛重量、巡航速度、註冊號、註冊國、
-  發動機系列與營運者。318 個機型代碼、107 張輪廓、6004 家營運者全部編進韌體 ——
-  不查詢、不連網,離線可用(OpenSky 不給機型代碼,選中的那一架會另外查一次)。
-- **ATC 模式** —— 目標方塊、2 分鐘速度向量、漸淡歷史軌跡,以及本地衝突警示。
-- **氣象回波** —— 來自 [RainViewer](https://www.rainviewer.com/) 的雨區雷達,在背景核心
-  解碼合成,UI 完全不卡。
-- **地圖輪廓** —— 海岸線、行政邊界、機場、跑道、導航點與空域。
-- **鬧鐘** —— 4 組鬧鐘、可分別設定星期,透過 Home Assistant 喇叭或板載喇叭(P4)響鈴。
-- **時鐘/感測器頁 —— 點時鐘**(v1.4.0;P4 為 v1.4.3-p4)。上方是全螢幕時鐘與日期,下方最多 6 張
-  感測器卡片,顯示數值、MAX/MIN 和最近 24 小時的曲線。點時間切換大時鐘(S3 v1.4.1、P4 v1.4.4-p4 起)。
-  數值來源:在地天氣(室外溫濕度;S3 v1.4.1、P4 v1.4.4-p4 起另有海平面氣壓)、
-  開機自動偵測的 I²C 感測器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及從
-  畫面清單依類別挑選的任何 Home Assistant 數值感測器。卡片數量自動決定,也可用 **GRID** 指定。
-  點卡片的 ⚙ 選擇要顯示的內容,或設定上下限與各自的顏色。**ALARM** 進鬧鐘頁,**PWR** 關螢幕。
-  詳見[使用說明](docs/USAGE.md#時鐘感測器頁)。
-
-  ![時鐘/感測器頁:Home Assistant CO2 與室外溫濕度卡片](docs/clock_page.png)
-- **鬧鐘與時區:時鐘頁 → ALARM**—— 時鐘預設台北時間,在該頁的 **TIMEZONE** 選你的時區
-  (網頁介面的 *Timezone* 也能改),或選 **AUTO (BY LOCATION)** 依座標自動判斷(含日光節約)。
-- **掃描線可關閉** —— 點座標列進設定頁,切換 **RADAR SWEEP**(網頁介面的 *Radar Sweep*)
-  即可停掉旋轉掃描線;航班照常顯示,亮度固定。
-- **航班 strip 列表 —— 點右欄中間的 ▲ 箭頭**(MAP/ECHO/ATC 按鈕下方那條線上)。控制項會收起、
-  時鐘縮小到左上角,整個右欄改顯示依距離排序的航管式 flight strip:呼號、機型、飛行高度、
-  爬升/下降、地速、距離,每頁 6 架(◀ ▶ 翻頁)。點 strip 即選中該航班,在雷達上點飛機也會
-  找到對應的 strip;選中的 strip 會加框,並以白線畫出該航班進入畫面以來的完整航跡(重開機清空,
-  每次抓取記一點)。點 **▼** 放回控制項;模式重開機後沿用。
-
-  ![航班 strip 列表:選中航班與其航跡](docs/flight_strips.png)
-- **Home Assistant** —— 自動被探索;背光、Wi-Fi 訊號與按鈕都會成為實體。
-- **截圖** —— 三指滑動存成 BMP,可經 HTTP 下載;P4 還會另存一份到 microSD。
-- **全部在觸控螢幕上設定** —— Wi-Fi 走 captive portal,其餘都在面板上完成。設定存進 NVS、
-  重開機不遺失。**首次燒錄之後就能 OTA 更新。**
+- **即時航班雷達** —— 從 adsb.lol、airplanes.live 或 OpenSky 取得最多 40 架航班,附旋轉掃描線。
+- **點選航班**看起訖、squawk、高度、速度與機型;點機型看等比例輪廓與規格(離線資料庫)。
+- **ATC 模式與 flight strip** —— 速度向量、歷史軌跡、衝突警示;依距離排序的 strip 列表,選中航班畫出完整航跡。
+- **氣象與地圖** —— RainViewer 雨區回波;依你的座標下載海岸線、機場、跑道與空域。
+- **時鐘頁**(點時鐘)—— 最多 6 張感測器卡片與 24 小時曲線:在地天氣、開機自動偵測的 I²C 感測器
+  (AHT20、SHT3x/4x、BME280、SCD4x)或任何 Home Assistant 感測器。🆕 點時間切換大時鐘。
+- 🆕 **Home Assistant 裝置控制** —— 卡片切到 **CTRL**(按鈕或左右滑動),用滑桿與按鈕控制燈光
+  (亮度、色溫、模式)、窗簾、冷氣與風扇。
+- **鬧鐘** —— 4 組,透過 Home Assistant 喇叭(或 P4 板載喇叭)響鈴。
+- **全部在觸控螢幕上設定**,Home Assistant 自動探索,首次燒錄後即可 **OTA**。
 
 ### 安裝
 
-**最簡單 —— 用瀏覽器燒錄**(Chrome 或 Edge,不必安裝任何工具):
-**[開啟安裝頁面](https://delphicchen.github.io/esp32_flight_radar/install.html)**
+**[用瀏覽器燒錄](https://delphicchen.github.io/esp32_flight_radar/install.html)**(Chrome 或 Edge)。
+第一次要接 USB;卡住時按住 **BOOT**、點一下 **RESET**、再放開 **BOOT**。
 
-**從原始碼:**
-
-```bash
-git clone https://github.com/delphicchen/esp32_flight_radar
-cd esp32_flight_radar
-# S3 板 → main 分支:
-pip install 'esphome==2026.3.*'
-tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 第一次:USB
-tools/dev_flash.sh radar.yaml                          # 之後:Wi-Fi OTA
-# P4 板 → lvgl9 分支:
-git checkout lvgl9 && pip install 'esphome==2026.6.*'
-tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
-```
-
-燒錄一律用 `tools/dev_flash.sh`,不要直接 `esphome run`:五個入口的 ESPHome 裝置名都叫 flight-radar,直接跑可能拿到共用建置目錄裡「別塊板子」的舊映像(實際發生過:背光亮著但畫面全黑)。
-
-第一次必須用 **USB** 燒錄。卡住的話:按住 **BOOT**、點一下 **RESET**、放開 **BOOT**。
+從原始碼:見上方 [English → Install](#install) 的指令。請用 `tools/dev_flash.sh` 燒錄,不要直接
+`esphome run`(所有入口共用同一個裝置名稱,可能燒到別塊板子的舊映像)。從 v1.2.0 以前升級要接 USB 燒一次(分割表換了)。
 
 ### 首次啟動
 
-1. 連上 **`Radar-Setup`** 熱點(密碼 `12345678`),選擇你家的 Wi-Fi。
-2. 點座標那一行,設定緯度、經度與掃描半徑。
-3. 一分鐘內就會出現航班。**MAP** / **ECHO** 預設開啟,可依喜好開關。
+1. 連上 **`Radar-Setup`** 熱點(密碼 `12345678`)並選擇你的 Wi-Fi。
+2. 點座標列設定經緯度與範圍,一分鐘內就會出現航班。
+3. 要用 Home Assistant 感測器、裝置控制或鬧鐘喇叭,在裝置網頁填入 *HA URL* 與 *HA Token*。
 
-除非你指定要用 OpenSky 來源,否則不需要任何帳號或金鑰。
-
-### 更多
-
-- **[使用指南](docs/USAGE.md)** —— 鬧鐘、ATC 模式、截圖存到 Home Assistant、在台灣以外地區使用
-- **[板子與內部細節](docs/BOARDS.md)** —— 逐板腳位與時序、本地元件覆寫、如何新增板子
-- **[更新紀錄](CHANGELOG.md)** —— 每個版本改了什麼,以及升級要付出什麼代價
+**更多:** [使用說明](docs/USAGE.md) · [板子與內部細節](docs/BOARDS.md) · [更新紀錄](CHANGELOG.md)
 
 ---
 
@@ -246,81 +121,32 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 
 ### 它能做什么
 
-- **实时航班雷达** —— 从 [OpenSky](https://opensky-network.org/)、
-  [airplanes.live](https://airplanes.live/) 或 [adsb.lol](https://adsb.lol/) 获取最多 40 架
-  航班,扫描线转到时目标会亮起。数据源可在屏幕上切换,OpenSky 失败会自动退回免密钥的来源。
-- **点选任一航班** 显示起讫机场、squawk(7500/7600/7700 转红)、高度、速度、航向、
-  升降率、距离与 ICAO 机型代码。
-- **点机型徽章** 看这台飞机本身:亮黄色俯视轮廓(依真实翼展等比缩放、以扫描线方式现形),
-  加上制造商、机型全名、翼展、机身长度、最大起飞重量、巡航速度、注册号、注册国、
-  发动机系列与营运者。318 个机型代码、107 张轮廓、6004 家营运者全部编进固件 ——
-  不查询、不连网,离线可用(OpenSky 不给机型代码,选中的那一架会另外查一次)。
-- **ATC 模式** —— 目标方块、2 分钟速度向量、渐淡历史轨迹,以及本地冲突警示。
-- **气象回波** —— 来自 [RainViewer](https://www.rainviewer.com/) 的雨区雷达,在后台核心
-  解码合成,UI 完全不卡。
-- **地图轮廓** —— 海岸线、行政边界、机场、跑道、导航点与空域。
-- **闹钟** —— 4 组闹钟、可分别设定星期,通过 Home Assistant 音箱或板载喇叭(P4)响铃。
-- **时钟/传感器页 —— 点时钟**(v1.4.0;P4 为 v1.4.3-p4)。上方是全屏时钟与日期,下方最多 6 张
-  传感器卡片,显示数值、MAX/MIN 和最近 24 小时的曲线。点时间切换大时钟(S3 v1.4.1、P4 v1.4.4-p4 起)。
-  数值来源:本地天气(室外温湿度;S3 v1.4.1、P4 v1.4.4-p4 起另有海平面气压)、
-  开机自动检测的 I²C 传感器(AHT20、SHT3x/SHT4x、BME280/BMP280、SCD40/41 CO2),以及从
-  屏幕列表按类别挑选的任何 Home Assistant 数值传感器。卡片数量自动决定,也可用 **GRID** 指定。
-  点卡片的 ⚙ 选择要显示的内容,或设定上下限与各自的颜色。**ALARM** 进闹钟页,**PWR** 关屏幕。
-  详见[使用说明](docs/USAGE.md#時鐘感測器頁)。
-
-  ![时钟/传感器页:Home Assistant CO2 与室外温湿度卡片](docs/clock_page.png)
-- **闹钟与时区:时钟页 → ALARM**—— 时钟默认台北时间,在该页的 **TIMEZONE** 选你的时区
-  (网页界面的 *Timezone* 也能改),或选 **AUTO (BY LOCATION)** 按坐标自动判断(含夏令时)。
-- **扫描线可关闭** —— 点坐标行进设置页,切换 **RADAR SWEEP**(网页界面的 *Radar Sweep*)
-  即可停掉旋转扫描线;航班照常显示,亮度固定。
-- **航班 strip 列表 —— 点右栏中间的 ▲ 箭头**(MAP/ECHO/ATC 按钮下方那条线上)。控件会收起、
-  时钟缩小到左上角,整个右栏改显示按距离排序的航管式 flight strip:呼号、机型、飞行高度、
-  爬升/下降、地速、距离,每页 6 架(◀ ▶ 翻页)。点 strip 即选中该航班,在雷达上点飞机也会
-  找到对应的 strip;选中的 strip 会加框,并以白线画出该航班进入画面以来的完整航迹(重启清空,
-  每次抓取记一点)。点 **▼** 放回控件;模式重启后沿用。
-
-  ![航班 strip 列表:选中航班与其航迹](docs/flight_strips.png)
-- **Home Assistant** —— 自动被发现;背光、Wi-Fi 信号与按钮都会成为实体。
-- **截图** —— 三指滑动存成 BMP,可经 HTTP 下载;P4 还会另存一份到 microSD。
-- **全部在触摸屏上设定** —— Wi-Fi 走 captive portal,其余都在面板上完成。设定存进 NVS、
-  重启不丢失。**首次烧录之后就能 OTA 更新。**
+- **实时航班雷达** —— 从 adsb.lol、airplanes.live 或 OpenSky 获取最多 40 架航班,附旋转扫描线。
+- **点选航班**看起讫、squawk、高度、速度与机型;点机型看等比例轮廓与规格(离线数据库)。
+- **ATC 模式与 flight strip** —— 速度矢量、历史轨迹、冲突警示;按距离排序的 strip 列表,选中航班画出完整航迹。
+- **气象与地图** —— RainViewer 雨区回波;按你的坐标下载海岸线、机场、跑道与空域。
+- **时钟页**(点时钟)—— 最多 6 张传感器卡片与 24 小时曲线:本地天气、开机自动检测的 I²C 传感器
+  (AHT20、SHT3x/4x、BME280、SCD4x)或任何 Home Assistant 传感器。🆕 点时间切换大时钟。
+- 🆕 **Home Assistant 设备控制** —— 卡片切到 **CTRL**(按钮或左右滑动),用滑杆与按钮控制灯光
+  (亮度、色温、模式)、窗帘、空调与风扇。
+- **闹钟** —— 4 组,通过 Home Assistant 音箱(或 P4 板载喇叭)响铃。
+- **全部在触摸屏上设置**,Home Assistant 自动发现,首次烧录后即可 **OTA**。
 
 ### 安装
 
-**最简单 —— 用浏览器烧录**(Chrome 或 Edge,不必安装任何工具):
-**[打开安装页面](https://delphicchen.github.io/esp32_flight_radar/install.html)**
+**[用浏览器烧录](https://delphicchen.github.io/esp32_flight_radar/install.html)**(Chrome 或 Edge)。
+第一次要接 USB;卡住时按住 **BOOT**、点一下 **RESET**、再松开 **BOOT**。
 
-**从源码:**
-
-```bash
-git clone https://github.com/delphicchen/esp32_flight_radar
-cd esp32_flight_radar
-# S3 板 → main 分支:
-pip install 'esphome==2026.3.*'
-tools/dev_flash.sh radar.yaml --device /dev/ttyACM0   # 第一次:USB
-tools/dev_flash.sh radar.yaml                          # 之後:Wi-Fi OTA
-# P4 板 → lvgl9 分支:
-git checkout lvgl9 && pip install 'esphome==2026.6.*'
-tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
-```
-
-烧录一律用 `tools/dev_flash.sh`,不要直接 `esphome run`:五个入口的 ESPHome 装置名都叫 flight-radar,直接跑可能拿到共用构建目录里「别块板子」的旧映像(实际发生过:背光亮着但画面全黑)。
-
-第一次必须用 **USB** 烧录。卡住的话:按住 **BOOT**、点一下 **RESET**、放开 **BOOT**。
+从源码:见上方 [English → Install](#install) 的命令。请用 `tools/dev_flash.sh` 烧录,不要直接
+`esphome run`(所有入口共用同一个设备名称,可能烧到别块板子的旧镜像)。从 v1.2.0 以前升级要接 USB 烧一次(分区表换了)。
 
 ### 首次启动
 
-1. 连上 **`Radar-Setup`** 热点(密码 `12345678`),选择你家的 Wi-Fi。
-2. 点坐标那一行,设定纬度、经度与扫描半径。
-3. 一分钟内就会出现航班。**MAP** / **ECHO** 默认开启,可依喜好开关。
+1. 连上 **`Radar-Setup`** 热点(密码 `12345678`)并选择你的 Wi-Fi。
+2. 点坐标列设置经纬度与范围,一分钟内就会出现航班。
+3. 要用 Home Assistant 传感器、设备控制或闹钟音箱,在设备网页填入 *HA URL* 与 *HA Token*。
 
-除非你指定要用 OpenSky 数据源,否则不需要任何账号或密钥。
-
-### 更多
-
-- **[使用指南](docs/USAGE.md)** —— 闹钟、ATC 模式、截图存到 Home Assistant、在台湾以外地区使用
-- **[板子与内部细节](docs/BOARDS.md)** —— 逐板引脚与时序、本地组件覆盖、如何新增板子
-- **[更新记录](CHANGELOG.md)** —— 每个版本改了什么,以及升级要付出什么代价
+**更多:** [使用指南](docs/USAGE.md) · [板子与内部细节](docs/BOARDS.md) · [更新记录](CHANGELOG.md)
 
 ---
 
@@ -348,35 +174,24 @@ tools/dev_flash.sh radar-p4-7b.yaml --device /dev/ttyACM0
 - Climb/descent arrow glyphs — [DejaVu Sans](https://dejavu-fonts.github.io/)
 
 Please respect each provider's free-tier terms; this is a hobby build, not a service.
-請遵守各來源的免費方案條款;這是業餘作品,不是服務。
-请遵守各来源的免费方案条款;这是业余作品,不是服务。
+請遵守各來源的免費方案條款;這是業餘作品,不是服務。请遵守各来源的免费方案条款;这是业余作品,不是服务。
 
 ## ☕ Support / 贊助 / 赞助
 
-If you enjoy this project, you can buy me a coffee — though what I love most is your ⭐ **Star**!
-
-喜歡這個專案的話,可以請我喝杯咖啡 —— 不過我最喜歡的,還是你的 ⭐ **Star**!
-
-喜欢这个项目的话,可以请我喝杯咖啡 —— 不过我最喜欢的,还是你的 ⭐ **Star**!
+If you enjoy this project, a ⭐ **Star** means the most — or [buy me a coffee](https://ko-fi.com/delphicchen).
+喜歡的話,給個 ⭐ **Star** 就是最大的支持。喜欢的话,给个 ⭐ **Star** 就是最大的支持。
 
 [![Buy me a coffee on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/delphicchen)
-
----
 
 ## 🔗 Links / 友链
 
 - 非常感谢 [LINUX DO](https://linux.do/latest) 社区提供的交流平台 / Many thanks to the LINUX DO community for the great discussion platform.
 
----
-
 ## 📄 License / 授權 / 授权
 
-**Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)**
-
-You are free to **use, share and adapt** this project for **non-commercial purposes**, as long as you give appropriate credit and license your derivatives under the same terms. **Commercial use is not permitted.** See [`LICENSE`](LICENSE).
-
-你可以基於**非商業目的**自由**使用、分享與改作**本專案,前提是註明出處並以相同條款授權你的衍生作品。**不允許商業使用。** 詳見 [`LICENSE`](LICENSE)。
-
-你可以基于**非商业目的**自由**使用、分享与改作**本项目,前提是注明出处并以相同条款授权你的衍生作品。**不允许商业使用。** 详见 [`LICENSE`](LICENSE)。
+**[CC BY-NC-SA 4.0](LICENSE)** — free to use, share and adapt for **non-commercial** purposes
+with credit, under the same license. **Commercial use is not permitted.**
+非商業用途可自由使用、分享與改作,須註明出處並以相同條款授權;**不允許商業使用**。
+非商业用途可自由使用、分享与改作,须注明出处并以相同条款授权;**不允许商业使用**。
 
 © 2026 delphicchen

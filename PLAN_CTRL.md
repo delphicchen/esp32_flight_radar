@@ -51,6 +51,15 @@
 - 沒有 HA Token:CTRL 模式顯示「SET HA URL / TOKEN IN WEB UI」。
 - 重繪:沿用 set_text / card_style 的「沒變就不 set」。
 
+## 進度(2026-11-28)
+
+第 1–4 階段完成並在白牌實測(v1.5.0)。和原計畫不同處:
+- − / + 全部改成卡片上的滑桿(燈亮度、風扇風速、窗簾位置、冷氣溫度),0 = 關;燈的色溫 / 模式在齒輪。
+- 冷氣模式直接放卡片下方按鈕列(OFF、COOL、DRY 優先),放不下的在齒輪 → MODE。
+- 新版 HA 的 supported_features 是 IntFlag,模板 join 出 "1,2,4,8",要全部 OR 起來。
+- 網頁診斷 *Control States* / *Control Last Call*。
+- 窗簾(xiaomi)停下後 HA 回報位置 0:整合本身的問題,裝置端照實顯示。
+
 ## 分階段
 
 1. **框架**:SENSOR / CTRL 按鈕(一般/大時鐘兩種位置)、滑動切換、模式存 NVS + 網頁 select、

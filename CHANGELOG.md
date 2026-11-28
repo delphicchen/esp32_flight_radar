@@ -3,6 +3,30 @@
 Notable changes per release. Anything that changes how you flash or upgrade is called
 out first, because that is the part that costs you time.
 
+## [v1.5.0] — 2026-11-28
+
+The P4 gets the same changes in v1.5.0-p4.
+
+### Added
+
+- **Home Assistant control on the clock page.** **SENSOR / CTRL** under the time (or a left/right
+  swipe on the cards) switches the cards to control lights, covers, climate and fans:
+  - Light: tap to toggle, brightness slider (0 = off); ⚙ → color temperature and modes (effects).
+  - Cover: position slider and OPEN / STOP / CLOSE.
+  - Climate: target temperature slider and mode buttons; ⚙ → all modes.
+  - Fan: tap to toggle, speed slider (0 = off); ⚙ → oscillate.
+  - Pick devices on screen (+ ADD) or in the web UI (*Control 1–6*); GRID sets the card count.
+  - Changes show at once and are confirmed from Home Assistant; failures roll back with the error shown.
+  - Web UI diagnostics: *Control States* (what Home Assistant reports) and *Control Last Call*.
+- New web/HA entities: *Clock Cards*, *Control 1–6*, *Control States*, *Control Last Call*.
+
+### Changed
+
+- The SENSOR / CTRL buttons take the spot under the time; the date stays on the right.
+- S3 boards build with `-mtext-section-literals`. The firmware outgrew the Xtensa linker's
+  256 KB literal reach (`l32r: literal target out of range`).
+- README shortened and refreshed with new screenshots.
+
 ## [v1.4.1] — 2026-11-27
 
 The P4 gets the same changes in v1.4.4-p4.

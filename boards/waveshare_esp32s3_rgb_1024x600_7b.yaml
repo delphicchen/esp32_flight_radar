@@ -27,6 +27,7 @@ esphome:
       - "-DSCREEN_W=${disp_w}"
       - "-DSCREEN_H=${disp_h}"
       - "-DRADAR_CANVAS=${radar_canvas}"
+      - "-mtext-section-literals"  # 常數池跟著各自的函式:整個 main.cpp 太大,l32r 會搆不到(Xtensa 限 256KB)
       # This board uses the `mipi_rgb` display driver (see below). Both it and
       # rpi_dpi_rgb are parallel-RGB panels, so the framebuffer screenshot works
       # on either -- value 2 just tells radar_fetch.h which wrapper class holds

@@ -1,11 +1,11 @@
 # Usage guide / 使用指南
 
 The features that need more than a sentence: alarms (including Google Nest
-speakers), ATC mode, screenshots to Home Assistant, and using the radar outside
-Taiwan.
+speakers), the clock & sensor page, Home Assistant control, ATC mode, screenshots
+to Home Assistant, and using the radar outside Taiwan.
 
-需要多講幾句的功能:鬧鐘(含 Google Nest 喇叭)、ATC 模式、截圖存到 Home
-Assistant,以及在台灣以外地區使用。
+需要多講幾句的功能:鬧鐘(含 Google Nest 喇叭)、時鐘/感測器頁、Home Assistant
+裝置控制、ATC 模式、截圖存到 Home Assistant,以及在台灣以外地區使用。
 
 [English](#english) · [中文](#中文)
 
@@ -102,6 +102,30 @@ came in v1.4.1 (S3) and v1.4.4-p4 (P4).
   repeat, OFF to clear) and the color for normal, above HIGH and below LOW. Outside the limits
   the value, the curve and the card border change color. Nothing sounds and the screen does not
   wake. The setting follows the value, not the card. CO2 starts with HIGH 1200 in red.
+
+## Home Assistant control (CTRL)
+
+From v1.5.0 on the S3 boards and v1.5.0-p4 on the P4. Needs *HA URL* and *HA Token* in the web UI.
+
+- **Switch:** **SENSOR** / **CTRL** under the time (top-left in large-clock mode), or swipe the
+  cards left (CTRL) and right (SENSOR). Web UI: *Clock Cards*. GRID sets the card count for both.
+- **Add a device:** tap **+ ADD** (or a card's ⚙ → **CHANGE DEVICE**), pick LIGHT / COVER /
+  CLIMATE / FAN, then the entity. Card *N* is stored as *Control N* in the web UI; ⚙ → type menu →
+  **REMOVE** clears it. In AUTO, one empty **+ ADD** card follows the last configured one.
+
+| Type | On the card | Under ⚙ |
+|---|---|---|
+| Light | tap to toggle; brightness slider (0 = off) | **COLOR TEMP**, **MODE** (effects) |
+| Cover | position slider; **OPEN / STOP / CLOSE** | |
+| Climate | target temperature slider; mode buttons (current one highlighted) | **MODE** (all modes) |
+| Fan | tap to toggle; speed slider (0 = off) | **OSCILLATE** |
+
+- Only what the device supports is shown. Sliders send when you let go.
+- The card changes at once and shows `...` until Home Assistant confirms. If the call fails or
+  nothing comes back within 4 seconds, the card returns to its old state and shows the error in red.
+- While the CTRL cards are on screen, states are read every 5 seconds.
+- **Something missing or wrong?** The web UI's *Control States* shows what Home Assistant reports
+  for each card, and *Control Last Call* the last command with its HTTP status. Include both in an issue.
 
 ## Aircraft type silhouettes and specs
 
@@ -316,6 +340,29 @@ S3 板子從 v1.4.0、P4 從 v1.4.3-p4 起提供;大時鐘與室外氣壓是 v1.
 - **門檻與顏色:** ⚙ → **ALERT ...** 設定上限 HIGH 和下限 LOW(− / +,按住連續調,OFF 取消),
   以及正常、超過上限、低於下限各自的顏色。超出範圍時,數值、曲線和卡片外框會換色,不會發聲也不會
   亮屏。設定跟著數值走,不跟著格子。CO2 預設上限 1200、紅色。
+
+## Home Assistant 裝置控制(CTRL)
+
+S3 板子從 v1.5.0、P4 從 v1.5.0-p4 起提供。需要在網頁介面填 *HA URL* 與 *HA Token*。
+
+- **切換:** 時間下方的 **SENSOR** / **CTRL**(大時鐘模式在左上角),或把卡片區往左滑(CTRL)、
+  往右滑(SENSOR)。網頁介面是 *Clock Cards*。兩種模式共用 GRID 格數。
+- **加裝置:** 點 **+ ADD**(或卡片 ⚙ → **CHANGE DEVICE**),選 LIGHT / COVER / CLIMATE / FAN,
+  再選實體。第 *N* 格存在網頁介面的 *Control N*;⚙ → 類型選單 → **REMOVE** 清掉。AUTO 時,
+  最後一張有設定的卡片後面會多一張空的 **+ ADD**。
+
+| 類型 | 卡片上 | ⚙ 裡 |
+|---|---|---|
+| 燈光 | 點卡片開關;亮度滑桿(0 = 關) | **COLOR TEMP** 色溫、**MODE** 模式 |
+| 窗簾 | 位置滑桿;**OPEN / STOP / CLOSE** | |
+| 冷氣 | 設定溫度滑桿;模式按鈕(目前模式反白) | **MODE**(全部模式) |
+| 風扇 | 點卡片開關;風速滑桿(0 = 關) | **OSCILLATE** 擺頭 |
+
+- 只顯示裝置支援的功能。滑桿放開才送出。
+- 卡片會立刻變化並標 `...`,等 Home Assistant 確認;呼叫失敗或 4 秒沒回應,卡片恢復原狀並以紅字顯示錯誤。
+- CTRL 卡片顯示中,每 5 秒讀一次狀態。
+- **功能沒出現或不對?** 網頁介面的 *Control States* 是 Home Assistant 回報的各卡片原始屬性,
+  *Control Last Call* 是最後一次指令與 HTTP 狀態碼。開 issue 時請附上這兩項。
 
 ## 機型輪廓與規格
 

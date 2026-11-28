@@ -115,6 +115,7 @@ struct Job {
              // 6 = route cache, 7 = 機型查詢(callsign 欄放 ICAO24 十六進位字串),
              // 8 = 下載地圖圖磚,9 = HA 感測器清單(#24),10 = HA 感測器數值(callsign 欄放逗號分隔的 entity_id)
              // 11 = HA 控制實體清單,12 = HA 控制實體狀態(callsign 同 10)(時鐘頁 CTRL,PLAN_CTRL.md)
+             // 13 = HA 服務呼叫(callsign = "domain/service\nJSON body",src = 格號*1000+序號)
   std::string cid, sec, callsign;
   float lat, lon, range;
   int src;   // states 資料來源:0=OpenSky 1=airplanes.live 2=adsb.lol
@@ -170,6 +171,9 @@ inline int g_ctl_list_status = 0;
 inline volatile bool g_ctl_list_ready = false;
 inline std::string g_ctl_states;
 inline volatile bool g_ctl_states_ready = false;
+// 服務呼叫結果:(src, HTTP 狀態);可能連續好幾個才被主迴圈收,所以排成一列
+inline std::vector<std::pair<int, int>> g_ctl_calls;
+inline volatile bool g_ctl_calls_ready = false;
 inline volatile bool g_speakers_ready = false;
 inline int g_spk_status = 0;               // HTTP 狀態:200 成功 / 401 token 錯 / <=0 連不上
 
@@ -737,7 +741,9 @@ inline void do_ctl_states(const Job &j) {
       "{{ a(i,'brightness') }}|{{ a(i,'current_position') }}|{{ a(i,'current_temperature') }}|"
       "{{ a(i,'temperature') }}|{{ a(i,'hvac_modes') }}|{{ a(i,'min_temp') }}|{{ a(i,'max_temp') }}|"
       "{{ a(i,'target_temp_step') }}|{{ a(i,'percentage') }}|{{ a(i,'percentage_step') }}|"
-      "{{ a(i,'oscillating') }}|{{ a(i,'supported_features') }}|{{ a(i,'supported_color_modes') }}\\n"
+      "{{ a(i,'oscillating') }}|{{ a(i,'supported_features') }}|{{ a(i,'supported_color_modes') }}|"
+      "{{ a(i,'color_temp_kelvin') }}|{{ a(i,'min_color_temp_kelvin') }}|{{ a(i,'max_color_temp_kelvin') }}|"
+      "{{ (state_attr(i,'effect_list') or []) | join(';') | replace('|','/') }}|{{ a(i,'effect') }}\\n"
       "{% endfor %}\"}";
   int st = 0;
   std::string r = http_req(url, true, body, "application/json", j.sec, st);
@@ -745,6 +751,22 @@ inline void do_ctl_states(const Job &j) {
   xSemaphoreTake(mtx(), portMAX_DELAY);
   g_ctl_states = (st == 200) ? r : "";
   g_ctl_states_ready = (st == 200);
+  xSemaphoreGive(mtx());
+}
+
+// 時鐘頁 CTRL:POST /api/services/<domain>/<service>(body 由主迴圈組好,entity_id 已驗證)
+inline void do_ctl_call(const Job &j) {
+  size_t nl = j.callsign.find('\n');
+  if (nl == std::string::npos) return;
+  std::string url = j.cid;
+  while (!url.empty() && url.back() == '/') url.pop_back();
+  url += "/api/services/" + j.callsign.substr(0, nl);
+  int st = 0;
+  http_req(url, true, j.callsign.substr(nl + 1), "application/json", j.sec, st);
+  ESP_LOGI("radar_bg", "ctl call %s http %d", j.callsign.substr(0, nl).c_str(), st);
+  xSemaphoreTake(mtx(), portMAX_DELAY);
+  g_ctl_calls.emplace_back(j.src, st);
+  g_ctl_calls_ready = true;
   xSemaphoreGive(mtx());
 }
 
@@ -1014,6 +1036,7 @@ inline void task_fn(void *arg) {
       else if (j->type == 10) do_ha_vals(*j);
       else if (j->type == 11) do_ctl_list(*j);
       else if (j->type == 12) do_ctl_states(*j);
+      else if (j->type == 13) do_ctl_call(*j);
       delete j;
     }
   }
@@ -1101,6 +1124,18 @@ inline void request_ctl_states(const std::string &url, const std::string &token,
   ensure_task();
   Job *j = new Job{12, url, token, ids, 0, 0, 0};
   if (xQueueSend(queue(), &j, 0) != pdTRUE) delete j;   // 下一輪(5 秒)再抓
+}
+
+// 控制指令不能被航班抓取擠掉:插到佇列最前面;還是滿的就回 false,由 ctrl::tick() 下一輪重送
+inline bool request_ctl_call(const std::string &url, const std::string &token, const std::string &path,
+                             const std::string &body, int src) {
+  ensure_task();
+  Job *j = new Job{13, url, token, path + "\n" + body, 0, 0, 0, src};
+  if (xQueueSendToFront(queue(), &j, 0) != pdTRUE) {
+    delete j;
+    return false;
+  }
+  return true;
 }
 
 inline void request_route(const std::string &cs) {
