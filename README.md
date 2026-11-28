@@ -13,9 +13,11 @@ Home Assistant 控制面板与闹钟。
 
 ![ESP32 Flight Radar — radar sweep, ATC mode and the alarm page](docs/ATC_clock.gif)
 
-| Sensor page / 感測器頁 | 🆕 Home Assistant control / 裝置控制 | 🆕 Large clock / 大時鐘 |
-|---|---|---|
-| ![Clock page with sensor curves](docs/sensor_page.webp) | ![Clock page controlling a light, curtain, AC and fan](docs/ctrl_page.webp) | ![Large clock with three control cards](docs/large_clock.webp) |
+| 🆕 Home Assistant control / 裝置控制 | Flight strips / 航班列表 |
+|---|---|
+| ![Clock page controlling a light, curtain, AC and fan](docs/ctrl_page.webp) | ![Flight strip list with a selected aircraft and its track](docs/flight_strips.png) |
+| **Sensor page / 感測器頁** | **🆕 Large clock / 大時鐘** |
+| ![Clock page with sensor curves](docs/sensor_page.webp) | ![Large clock with three control cards](docs/large_clock.webp) |
 
 ▶ **[Demo video / 示範影片 / 示范影片](docs/demo.mp4)** · Inspired by [AnthonySturdy/micro-radar](https://github.com/AnthonySturdy/micro-radar)
 
@@ -46,8 +48,8 @@ All need **≥8 MB octal PSRAM**, a **GT911** touch controller and **16 MB flash
 - **Live flight radar** — up to 40 aircraft from adsb.lol, airplanes.live or OpenSky, with a rotating sweep.
 - **Tap an aircraft** for route, squawk, altitude, speed and type; tap the type for a to-scale
   silhouette and specs from an offline database.
-- **ATC mode and flight strips** — velocity vectors, trails, conflict alert, and a strip list
-  sorted by distance that draws the selected flight's full track.
+- **ATC mode and flight strips** — velocity vectors, trails, conflict alert; tap **▲** in the
+  right panel for a strip list sorted by distance that draws the selected flight's full track.
 - **Weather and map** — RainViewer rain echo; coastlines, airports, runways and airspace for your own location.
 - **Clock page** (tap the clock) — up to 6 sensor cards with 24-hour curves: local weather,
   I²C sensors detected at boot (AHT20, SHT3x/4x, BME280, SCD4x) or any Home Assistant sensor.
@@ -90,7 +92,8 @@ run can flash another board's stale image. Coming from v1.2.0 or older, flash on
 
 - **即時航班雷達** —— 從 adsb.lol、airplanes.live 或 OpenSky 取得最多 40 架航班,附旋轉掃描線。
 - **點選航班**看起訖、squawk、高度、速度與機型;點機型看等比例輪廓與規格(離線資料庫)。
-- **ATC 模式與 flight strip** —— 速度向量、歷史軌跡、衝突警示;依距離排序的 strip 列表,選中航班畫出完整航跡。
+- **ATC 模式與 flight strip** —— 速度向量、歷史軌跡、衝突警示;點右欄的 **▲** 打開依距離排序的 strip 列表,
+  選中航班畫出完整航跡。
 - **氣象與地圖** —— RainViewer 雨區回波;依你的座標下載海岸線、機場、跑道與空域。
 - **時鐘頁**(點時鐘)—— 最多 6 張感測器卡片與 24 小時曲線:在地天氣、開機自動偵測的 I²C 感測器
   (AHT20、SHT3x/4x、BME280、SCD4x)或任何 Home Assistant 感測器。🆕 點時間切換大時鐘。
@@ -123,7 +126,8 @@ run can flash another board's stale image. Coming from v1.2.0 or older, flash on
 
 - **实时航班雷达** —— 从 adsb.lol、airplanes.live 或 OpenSky 获取最多 40 架航班,附旋转扫描线。
 - **点选航班**看起讫、squawk、高度、速度与机型;点机型看等比例轮廓与规格(离线数据库)。
-- **ATC 模式与 flight strip** —— 速度矢量、历史轨迹、冲突警示;按距离排序的 strip 列表,选中航班画出完整航迹。
+- **ATC 模式与 flight strip** —— 速度矢量、历史轨迹、冲突警示;点右栏的 **▲** 打开按距离排序的 strip 列表,
+  选中航班画出完整航迹。
 - **气象与地图** —— RainViewer 雨区回波;按你的坐标下载海岸线、机场、跑道与空域。
 - **时钟页**(点时钟)—— 最多 6 张传感器卡片与 24 小时曲线:本地天气、开机自动检测的 I²C 传感器
   (AHT20、SHT3x/4x、BME280、SCD4x)或任何 Home Assistant 传感器。🆕 点时间切换大时钟。
